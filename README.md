@@ -19,7 +19,7 @@ ArcFlow is a browser-based diagramming tool for building clean node-and-edge flo
 Clone or download the repository, then open `index.html` in a modern browser.
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/w4qq4s/arcflow
 cd arcflow
 ```
 
