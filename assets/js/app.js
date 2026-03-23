@@ -1559,6 +1559,7 @@ cw.addEventListener('wheel', e=>{
 
 window.addEventListener('keydown',e=>{
   if(isPanModifierKey(e))return;
+  if(document.getElementById('exp-modal')?.classList.contains('open'))return;
   if((e.metaKey||e.ctrlKey)&&e.code==='Slash'){
     e.preventDefault();
     showHelp();
@@ -2038,19 +2039,37 @@ function doExport(fmt){
   img.src=url;
 }
 
-document.getElementById('bexp').addEventListener('click',()=>{
+const expModal=document.getElementById('exp-modal');
+const expCloseBtn=document.getElementById('exp-close');
+function closeExportModal(){
+  expModal.classList.remove('open');
+  expModal.setAttribute('aria-hidden','true');
+}
+function openExportModal(){
   if(!S.nodes.length){uiAlert('There is nothing to export yet. Add at least one node first.','Export');return;}
-  document.getElementById('exp-modal').classList.add('open');
-});
-document.getElementById('exp-cancel').addEventListener('click',()=>document.getElementById('exp-modal').classList.remove('open'));
+  expModal.classList.add('open');
+  expModal.setAttribute('aria-hidden','false');
+  requestAnimationFrame(()=>{
+    expModal.querySelector('[data-fmt="svg"]')?.focus();
+  });
+}
+document.getElementById('bexp').addEventListener('click',openExportModal);
+document.getElementById('exp-cancel').addEventListener('click',closeExportModal);
+expCloseBtn.addEventListener('click',closeExportModal);
 document.querySelectorAll('[data-fmt]').forEach(btn=>{
   btn.addEventListener('click',()=>{
-    document.getElementById('exp-modal').classList.remove('open');
+    closeExportModal();
     doExport(btn.dataset.fmt);
   });
 });
-document.getElementById('exp-modal').addEventListener('click',e=>{
-  if(e.target===e.currentTarget)document.getElementById('exp-modal').classList.remove('open');
+expModal.addEventListener('click',e=>{
+  if(e.target===e.currentTarget)closeExportModal();
+});
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&expModal.classList.contains('open')){
+    e.preventDefault();
+    closeExportModal();
+  }
 });
 
 window.AF={zoom:doZoom,fitAll};

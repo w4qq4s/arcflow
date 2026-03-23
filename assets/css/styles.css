@@ -805,84 +805,205 @@ body.dark #minimap{background:rgba(21,26,32,.96)}
   align-items:center;
   justify-content:center;
   padding:24px;
-  background:rgba(10,14,18,.38);
-  backdrop-filter:blur(8px);
+  background:rgba(8,11,15,.44);
+  backdrop-filter:blur(10px);
   z-index:100;
 }
 
 #exp-modal.open{display:flex}
 
 .exp-box{
-  min-width:296px;
-  padding:20px;
+  position:relative;
+  width:min(620px,100%);
+  padding:24px;
   background:var(--bg1);
   border:1px solid var(--b2);
   border-radius:var(--r4);
-  box-shadow:var(--shadow);
+  box-shadow:0 28px 64px rgba(5,9,13,.28);
+}
+
+.exp-head{
+  margin-bottom:18px;
+  padding-right:36px;
+}
+
+.exp-kicker{
+  margin-bottom:8px;
+  color:var(--t3);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.16em;
+  text-transform:uppercase;
 }
 
 .exp-title{
-  margin-bottom:14px;
   color:var(--t1);
-  font-size:14px;
+  font-size:24px;
   font-weight:700;
-  letter-spacing:-.01em;
+  letter-spacing:-.03em;
+  line-height:1.1;
+}
+
+.exp-subtitle{
+  max-width:500px;
+  margin-top:8px;
+  color:var(--t2);
+  font-size:12.5px;
+  line-height:1.6;
 }
 
 .exp-row{
-  display:flex;
-  gap:8px;
-  margin-bottom:10px;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+
+.exp-close{
+  position:absolute;
+  top:16px;
+  right:16px;
+  width:28px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:var(--r2);
+  color:var(--t3);
+  cursor:pointer;
+  font-size:12px;
+}
+
+.exp-close:hover{
+  background:var(--bg2);
+  border-color:var(--b3);
+  color:var(--t1);
 }
 
 .exp-opt{
-  flex:1;
-  padding:12px 8px;
-  background:var(--bg2);
+  min-height:156px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:12px;
+  padding:16px 14px 14px;
+  background:linear-gradient(180deg,rgba(var(--acc-rgb),.045),transparent 48%),var(--bg2);
   border:1px solid var(--b2);
   border-radius:var(--r3);
   color:var(--t2);
   cursor:pointer;
-  text-align:center;
-  font-size:11px;
+  text-align:left;
+  font-size:12px;
+  transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease;
 }
 
 .exp-opt:hover{
-  background:var(--bg3);
-  color:var(--t1);
+  background:linear-gradient(180deg,rgba(var(--acc-rgb),.08),transparent 52%),var(--bg3);
+  border-color:rgba(var(--acc-rgb),.32);
+  box-shadow:0 10px 22px rgba(8,12,16,.12);
   transform:translateY(-1px);
 }
 
-.exp-opt:first-child{
-  background:var(--acc-l);
-  border-color:rgba(var(--acc-rgb),.34);
+.exp-opt-top{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
 }
 
 .exp-opt-icon{
-  display:block;
-  margin-bottom:6px;
+  width:38px;
+  height:38px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(var(--acc-rgb),.28);
+  border-radius:var(--r3);
+  background:rgba(var(--acc-rgb),.08);
   color:var(--acc);
-  font-size:18px;
-  line-height:1;
 }
 
-.exp-opt strong{
-  display:block;
-  margin-bottom:2px;
-  color:var(--t1);
-  font-size:12px;
+.exp-opt-icon svg{
+  width:18px;
+  height:18px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+.exp-opt-badge{
+  padding:4px 7px;
+  border:1px solid var(--b3);
+  border-radius:var(--r2);
+  color:var(--t3);
+  font-size:10px;
   font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+
+.exp-opt-label{
+  display:block;
+  color:var(--t1);
+  font-size:17px;
+  font-weight:700;
+  letter-spacing:-.03em;
+}
+
+.exp-opt-desc{
+  flex:1;
+  color:var(--t2);
+  font-size:12px;
+  line-height:1.55;
+}
+
+.exp-opt-meta{
+  color:var(--t3);
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.01em;
+}
+
+.exp-actions{
+  margin-top:12px;
 }
 
 .exp-cancel{
   width:100%;
-  height:31px;
+  height:36px;
   background:transparent;
   border:1px solid var(--b3);
   border-radius:var(--r3);
   color:var(--t2);
   cursor:pointer;
   font-size:12px;
+  font-weight:600;
+}
+
+.exp-cancel:hover{
+  background:var(--bg2);
+  border-color:var(--b2);
+  color:var(--t1);
+}
+
+@media (max-width:760px){
+  .exp-box{
+    padding:20px;
+  }
+
+  .exp-title{
+    font-size:21px;
+  }
+
+  .exp-row{
+    grid-template-columns:1fr;
+  }
+
+  .exp-opt{
+    min-height:auto;
+  }
 }
 
 .elabel{
