@@ -28,6 +28,8 @@ const ALIGN_SNAP_SCREEN_PX=10;
 const BROWSER_STORE_KEY='arcflow.browserProjects.v1';
 const MAX_BROWSER_PROJECTS=10;
 const AUTOSAVE_DELAY=900;
+const READ_ONLY_QUERY_VALUE=new URLSearchParams(window.location.search).get('readonly');
+const _SHARE_URL_PARAM=new URLSearchParams(window.location.search).get('share');
 
 const PAL=[
   {cat:'Orchestration',items:[
@@ -71,6 +73,7 @@ const PAL=[
 const S={
   nodes:[],edges:[],
   title:DEFAULT_PROJECT_TITLE,
+  readOnly:READ_ONLY_QUERY_VALUE==='1'||READ_ONLY_QUERY_VALUE==='true',
   sel:null,selT:null,
   multi:[],
   multiEdges:[],
@@ -97,6 +100,74 @@ function normalizeProjectTitle(v,fallback=''){
   if(typeof v!=='string')return fallback;
   const s=v.replace(/\s+/g,' ').trim().slice(0,120);
   return s||fallback;
+}
+function isReadOnly(){
+  return !!S.readOnly;
+}
+function syncReadOnlyUrl(){
+  const url=new URL(window.location.href);
+  if(S.readOnly)url.searchParams.set('readonly','1');
+  else url.searchParams.delete('readonly');
+  history.replaceState(null,'',url.toString());
+}
+function syncReadOnlyUi(){
+  const appEl=document.getElementById('app');
+  appEl?.classList.toggle('is-readonly',S.readOnly);
+  document.body.classList.toggle('read-only-mode',S.readOnly);
+  const toggle=document.getElementById('breadonly');
+  if(toggle){
+    toggle.textContent=S.readOnly?'Read only on':'Read only off';
+    toggle.classList.toggle('on',S.readOnly);
+    toggle.setAttribute('aria-pressed',S.readOnly?'true':'false');
+  }
+  const titleInput=document.getElementById('project-title');
+  if(titleInput)titleInput.readOnly=S.readOnly;
+  document.querySelectorAll('#sb .nc').forEach(el=>{
+    if(el.classList.contains('nc-cust'))return;
+    el.draggable=!S.readOnly;
+  });
+  document.getElementById('bundo')?.toggleAttribute('disabled',S.readOnly);
+  document.getElementById('bredo')?.toggleAttribute('disabled',S.readOnly);
+  document.getElementById('blay')?.toggleAttribute('disabled',S.readOnly);
+  document.getElementById('balign')?.toggleAttribute('disabled',S.readOnly);
+  document.getElementById('bclear')?.toggleAttribute('disabled',S.readOnly);
+  document.getElementById('snap-toggle')?.toggleAttribute('disabled',S.readOnly);
+  document.querySelectorAll('[data-align]').forEach(btn=>btn.toggleAttribute('disabled',S.readOnly));
+  document.getElementById('load-new')?.toggleAttribute('disabled',S.readOnly);
+  if(document.getElementById('load-modal')?.classList.contains('open'))renderLoadProjects();
+}
+function showReadOnlyToast(action='make changes'){
+  showToast(`Read-only mode is on. Turn it off to ${action}.`,'info');
+}
+function blockIfReadOnly(action='make changes'){
+  if(!S.readOnly)return false;
+  showReadOnlyToast(action);
+  return true;
+}
+function setReadOnly(next,{syncUrl=true,toast=false}={}){
+  const value=!!next;
+  if(S.readOnly===value){
+    syncReadOnlyUi();
+    return;
+  }
+  S.readOnly=value;
+  if(S.readOnly){
+    S.alignOpen=false;
+    S.drag=null;
+    S.wpDrag=null;
+    S.eDrag=null;
+    S.labelDrag=null;
+    S.rubber=null;
+    S.guides=[];
+    cancelConn?.();
+    mst=null;
+    dragMoved=false;
+  }
+  if(syncUrl)syncReadOnlyUrl();
+  syncReadOnlyUi();
+  draw();
+  props();
+  if(toast)showToast(S.readOnly?'Read-only mode enabled.':'Read-only mode disabled.',S.readOnly?'info':'success');
 }
 function projectFileStem(){
   const base=normalizeProjectTitle(S.title,'arcflow-diagram')
@@ -453,7 +524,7 @@ function renderLoadProjects(){
       </div>
       <div class="load-item-actions">
         <button class="load-btn" type="button" data-load-open="${escAttr(project.id)}">${project.id===S.activeProjectId?'Open':'Open'}</button>
-        <button class="load-icon-btn" type="button" data-load-del="${escAttr(project.id)}" aria-label="Delete project">✕</button>
+        <button class="load-icon-btn" type="button" data-load-del="${escAttr(project.id)}" aria-label="Delete project"${S.readOnly?' disabled':''}>✕</button>
       </div>
     </article>
   `).join('');
@@ -472,6 +543,7 @@ function renderLoadProjects(){
     closeLoadModal();
   }));
   list.querySelectorAll('[data-load-del]').forEach(btn=>btn.addEventListener('click',async()=>{
+    if(blockIfReadOnly('delete browser projects'))return;
     const projectId=btn.dataset.loadDel;
     const storeNow=readBrowserStore();
     const project=storeNow.projects.find(p=>p.id===projectId);
@@ -506,15 +578,24 @@ function closeLoadModal(){
   loadModal?.classList.remove('open');
   loadModal?.setAttribute('aria-hidden','true');
 }
+function isAppDialogOpen(){
+  return ['ui-modal','load-modal','exp-modal','share-modal'].some(id=>{
+    const el=document.getElementById(id);
+    return !!el&&el.classList.contains('open');
+  });
+}
 function openLoadModal(){
+  if(isAppDialogOpen())return;
   renderLoadProjects();
   loadModal?.classList.add('open');
   loadModal?.setAttribute('aria-hidden','false');
   requestAnimationFrame(()=>{
-    document.getElementById('load-new')?.focus();
+    const focusTarget=(S.readOnly?document.getElementById('load-import'):document.getElementById('load-new'))||document.querySelector('[data-load-open]')||document.getElementById('load-close');
+    focusTarget?.focus();
   });
 }
 async function createBlankBrowserProject(){
+  if(blockIfReadOnly('create browser projects'))return;
   const ok=await confirmCanvasReplacement('New blank project','Create a new blank browser project and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.');
   if(!ok)return;
   const projectId=generateProjectId();
@@ -990,7 +1071,7 @@ function drawContainers(){
 <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${SECTION_RX}" fill="${visuals.fill}" stroke="${visuals.stroke}" stroke-width="${sel?2:1}" stroke-dasharray="7 4"/>
 <text class="nt" x="${n.x+14}" y="${n.y+17}" font-size="12" font-weight="500" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.title}">${esc(n.title)}</text>
 ${n.sub?`<text class="ns" x="${n.x+14}" y="${n.y+32}" font-size="10" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.sub}">${esc(n.sub)}</text>`:''}
-${n.locked?'':`<rect class="rz-h" x="${rx-22}" y="${ry-22}" width="22" height="22" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" pointer-events="all"/>`}
+${(n.locked||S.readOnly)?'':`<rect class="rz-h" x="${rx-22}" y="${ry-22}" width="22" height="22" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" pointer-events="all"/>`}
 <path d="${lpath}" fill="none" stroke="${mixHex(visuals.stroke,themeColors().bg2,0.35)}" stroke-width="${lthk}" stroke-linecap="round" pointer-events="none" opacity=".82"/>
 ${n.locked?renderLockBadge(n.x+n.w-26,n.y+10,visuals.stroke):''}
 </g>`;
@@ -1033,7 +1114,7 @@ function drawNodes(){
     const visuals=resolveNodeVisuals(n);
     const sub=(n.tp==='two'||isText)&&n.sub?`<text class="ns" x="${cx}" y="${n.y+n.h-13}" text-anchor="middle" dominant-baseline="central" font-size="11" font-family="${FF}" fill="${visuals.sub}">${esc(n.sub)}</text>`:'';
     const r=10;
-    const btns=(isText||n.locked)?'':([
+    const btns=(isText||n.locked||S.readOnly)?'':([
       {x:cx,y:n.y,port:'top',bx:cx-r,by:n.y-r*2,bw:r*2,bh:r*2},
       {x:cx,y:n.y+n.h,port:'bottom',bx:cx-r,by:n.y+n.h,bw:r*2,bh:r*2},
       {x:n.x,y:cy,port:'left',bx:n.x-r*2,by:cy-r,bw:r*2,bh:r*2},
@@ -1078,7 +1159,7 @@ function drawOverlay(){
     }
   });
 
-  if(S.sel&&S.selT==='edge'){
+  if(S.sel&&S.selT==='edge'&&!S.readOnly){
     const e=edById(S.sel);
     if(e){
       const fn=byId(e.from),tn=byId(e.to);
@@ -1192,7 +1273,7 @@ function props(){
       return;
     }
     prh.textContent='Properties';
-    prb.innerHTML=`<div class="pempty">Select a node or edge<br>to edit its properties</div>`;
+    prb.innerHTML=`<div class="pempty">${S.readOnly?'Read-only mode is on<br>Select a node or edge to inspect it':'Select a node or edge<br>to edit its properties'}</div>`;
     return;
   }
   if(S.selT==='node'){
@@ -1206,6 +1287,28 @@ function props(){
       ...outs.map(e=>{const t=byId(e.to);return t?`<div class="ci"><div class="cdot" style="background:${nodeAccent(t)}"></div><span class="clbl">→ ${esc(t.title)}</span>${editable?`<span class="cdel" data-deled="${escAttr(e.id)}">✕</span>`:''}</div>`:'';}),
       ...ins.map(e=>{const f=byId(e.from);return f?`<div class="ci"><div class="cdot" style="background:${nodeAccent(f)}"></div><span class="clbl">← ${esc(f.title)}</span>${editable?`<span class="cdel" data-deled="${escAttr(e.id)}">✕</span>`:''}</div>`:'';}),
     ].join('');
+    if(S.readOnly){
+      prh.textContent=isCont?'Section overview':'Node overview';
+      prb.innerHTML=`<div class="prs">
+<div class="pr-lock-card">
+  <div class="pr-lock-kicker">${nodeKindLabel(n)}</div>
+  <div class="pr-lock-title">${esc(n.title||'Untitled')}</div>
+  <div class="pr-lock-copy">Read-only mode is on. You can inspect this ${isCont?'section':'node'}, but editing is disabled.</div>
+  <div class="pr-lock-pill">Read only</div>
+</div>
+</div>
+<div class="pdv"></div>
+<div class="pstat"><span>Position</span><span>${Math.round(n.x)}, ${Math.round(n.y)}</span></div>
+<div class="pstat"><span>Size</span><span>${Math.round(n.w)} × ${Math.round(n.h)}</span></div>
+<div class="pstat"><span>Color</span><span>${esc(hasCustomColor?'Custom':(n.ramp==='text'?'Text':n.ramp))}</span></div>
+${isCont?`<div class="pstat"><span>Fill opacity</span><span>${Math.round(nodeFillOpacity(n)*100)}%</span></div>`:`<div class="pstat"><span>Node type</span><span>${n.tp==='two'?'Two line':n.tp==='one'?'Single line':'Text'}</span></div>`}
+${n.locked?`<div class="pstat"><span>Locked</span><span>Yes</span></div>`:''}
+${!isCont?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
+${!isCont&&n.sub?`<div class="prs"><div class="prl">Subtitle</div><div class="pr-lock-note">${esc(n.sub)}</div></div>`:''}
+${!isCont&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
+${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}`;
+      return;
+    }
     if(n.locked){
       prb.innerHTML=`<div class="prs">
 <div class="pr-lock-card">
@@ -1349,6 +1452,26 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
     prh.textContent='Edge properties';
     const fn=byId(e.from),tn=byId(e.to);
     const wc=(e.wps||[]).length;
+    if(S.readOnly){
+      prh.textContent='Edge overview';
+      prb.innerHTML=`<div class="prs">
+<div class="pr-lock-card">
+  <div class="pr-lock-kicker">Edge</div>
+  <div class="pr-lock-title">${esc(e.label||`${fn?.title||'Unknown'} → ${tn?.title||'Unknown'}`)}</div>
+  <div class="pr-lock-copy">Read-only mode is on. You can inspect this edge, but editing is disabled.</div>
+  <div class="pr-lock-pill">Read only</div>
+</div>
+</div>
+<div class="pdv"></div>
+<div class="pstat"><span>From</span><span>${esc(fn?.title||'?')}</span></div>
+<div class="pstat"><span>To</span><span>${esc(tn?.title||'?')}</span></div>
+<div class="pstat"><span>Line style</span><span>${e.dash?'Dashed':'Solid'}</span></div>
+<div class="pstat"><span>Color</span><span>${esc(hasCustomColor?'Custom':(e.col||'Default'))}</span></div>
+<div class="pstat"><span>Bend points</span><span>${wc}</span></div>
+${e.label?`<div class="prs"><div class="prl">Edge label</div><div class="pr-lock-note">${esc(e.label)}</div></div>`:''}
+${fromLocked||toLocked?`<div class="tip">${fromLocked?'The source node is locked. ':''}${toLocked?'The target node is locked.':''}</div>`:''}`;
+      return;
+    }
     prb.innerHTML=`<div class="prs">
 <div class="prl">Edge label</div>
 <input class="pri" id="elbl" value="${esc(e.label||'')}" placeholder="e.g. triggers, blocks, 72%"/>
@@ -1436,7 +1559,13 @@ function buildSidebar(){
       // Set node color as CSS custom property for left border + hover styling
       if(RMAP[tmpl.ramp])d.style.setProperty('--nc-color',RMAP[tmpl.ramp]);
       d.innerHTML=`<div class="ndot" style="${isCont?`background:transparent;border:1.5px dashed ${RMAP[tmpl.ramp]}`:`background:${RMAP[tmpl.ramp]}`}"></div><div><div class="nname">${tmpl.title}</div><div class="ntype">${tmpl.ramp} · ${isCont?'section':tmpl.tp==='two'?'2-line':'single'}</div></div>`;
-      d.addEventListener('dragstart',e=>{e.dataTransfer.setData('af-tmpl',JSON.stringify(tmpl));e.dataTransfer.effectAllowed='copy';});
+      d.addEventListener('dragstart',e=>{
+        if(blockIfReadOnly('add nodes from the sidebar')){
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.setData('af-tmpl',JSON.stringify(tmpl));e.dataTransfer.effectAllowed='copy';
+      });
       sb.appendChild(d);
     });
   });
@@ -1444,6 +1573,7 @@ function buildSidebar(){
   const cu=document.createElement('div');cu.className='nc nc-cust';
   cu.innerHTML=`<div><div class="nname">+ Custom node...</div></div>`;
   cu.addEventListener('click',async ()=>{
+    if(blockIfReadOnly('create custom nodes'))return;
     const t=await uiPrompt('Enter the node title.',{title:'Create custom node',value:'New node',okText:'Create'});
     if(t===null)return;
     const title=(t||'').trim();
@@ -1459,6 +1589,7 @@ function buildSidebar(){
 }
 
 function addNode(tmpl,x,y){
+  if(isReadOnly())return;
   const id='n'+(S.nid++);
   const isCont=tmpl.tp==='cont';
   const isText=tmpl.tp==='text';
@@ -1608,6 +1739,8 @@ const HELP_TEXT=[
   'Ctrl + drag or middle-mouse drag  Pan',
   'Ctrl + scroll or pinch  Zoom',
   'Snap on  Enable grid, alignment, and bend snapping',
+  'Read only toggle  Inspect diagrams without editing',
+  '?readonly=1  Start ArcFlow in read-only mode',
   '',
   'Align',
   '',
@@ -1619,7 +1752,14 @@ const HELP_TEXT=[
   'Bottom  Align bottom edges',
   'Distribute H  Evenly space nodes horizontally',
   'Distribute V  Evenly space nodes vertically',
-  'Match width  Make selected nodes the same width'
+  'Match width  Make selected nodes the same width',
+  '',
+  'Credits',
+  '',
+  'Built by Waqqas',
+  'GitHub  https://github.com/w4qq4s',
+  'LinkedIn  https://www.linkedin.com/in/waqqas-h-937a91382/',
+  'License  MIT'
 ].join('\n');
 const HELP_SECTIONS=[
   {
@@ -1646,6 +1786,8 @@ const HELP_SECTIONS=[
       {keys:['Ctrl + drag','Middle-mouse drag'],desc:'Pan the canvas'},
       {keys:['Ctrl + scroll','Pinch'],desc:'Zoom in or out'},
       {keys:['Snap on'],desc:'Enable grid, alignment, and bend snapping'},
+      {keys:['Read only toggle'],desc:'Inspect diagrams without allowing edits'},
+      {keys:['?readonly=1'],desc:'Launch ArcFlow directly in read-only mode from the URL'},
       {keys:['Align button'],desc:'Open the Align bar manually from the toolbar'},
     ]
   }
@@ -1701,12 +1843,20 @@ function renderHelpHtml(){
         </div>
       </details>
       <div class="ui-help-note">The Align bar opens automatically when two or more nodes are selected, and it can also be opened anytime from the toolbar.</div>
+      <section class="ui-help-credits">
+        <div class="ui-help-credits-title">Credits</div>
+        <div class="ui-help-credits-copy">Built by Waqqas</div>
+        <div class="ui-help-credit-links">
+          <a class="ui-help-credit-link" href="https://github.com/w4qq4s" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="ui-help-credit-link" href="https://www.linkedin.com/in/waqqas-h-937a91382/" target="_blank" rel="noreferrer">LinkedIn</a>
+          <span class="ui-help-credit-meta">MIT License</span>
+        </div>
+      </section>
     </div>
   `;
 }
 function showHelp(){
-  const ui=getUiEls();
-  if(ui.modal?.classList.contains('open')||document.getElementById('exp-modal')?.classList.contains('open')||document.getElementById('load-modal')?.classList.contains('open'))return Promise.resolve(false);
+  if(isAppDialogOpen())return Promise.resolve(false);
   return showModalUI({
     title:'ArcFlow help',
     message:HELP_TEXT,
@@ -1801,6 +1951,7 @@ function setConnHover(nodeId=null,port=null){
   }
 }
 function createConnectionFromConn(targetId,targetPort=null){
+  if(S.readOnly)return false;
   if(!S.conn||!targetId||targetId===S.conn.fromId)return false;
   const targetNode=byId(targetId);
   if(!targetNode)return false;
@@ -1866,6 +2017,7 @@ cw.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect=
 cw.addEventListener('drop',e=>{
   e.preventDefault();
   const str=e.dataTransfer.getData('af-tmpl');if(!str)return;
+  if(blockIfReadOnly('add nodes from the sidebar'))return;
   const pos=toSVG(e.clientX,e.clientY);
   addNode(JSON.parse(str),pos.x,pos.y);
 });
@@ -1881,6 +2033,10 @@ cw.addEventListener('pointerdown',e=>{
   if(pb){
     e.stopPropagation();e.preventDefault();
     const n=byId(pb.dataset.nid);if(!n)return;
+    if(S.readOnly){
+      showReadOnlyToast('connect nodes');
+      return;
+    }
     if(S.conn){
       if(pb.dataset.nid===S.conn.fromId){
         cancelConn();
@@ -1902,12 +2058,14 @@ cw.addEventListener('pointerdown',e=>{
 
   if(t.dataset.wpid&&t.dataset.wpdx!==undefined){
     e.stopPropagation();e.preventDefault();
+    if(blockIfReadOnly('edit bend points'))return;
     S.wpDrag={eid:t.dataset.wpid,idx:+t.dataset.wpdx};
     mst='wpDrag';return;
   }
 
   if(t.dataset.wpadd&&t.dataset.wpi!==undefined){
     e.stopPropagation();e.preventDefault();
+    if(blockIfReadOnly('reroute edges'))return;
     const pos=toSVG(e.clientX,e.clientY);
     const edge=edById(t.dataset.wpadd);
     if(edge){
@@ -1926,7 +2084,7 @@ cw.addEventListener('pointerdown',e=>{
       const alreadySelected=S.sel===edge.id&&S.selT==='edge';
       S.multi=[];S.multiEdges=[];
       S.sel=edge.id;S.selT='edge';draw();props();
-      if(!alreadySelected)return;
+      if(!alreadySelected||S.readOnly)return;
       const pos=toSVG(e.clientX,e.clientY);
       const offset=normalizeLabelOffset(edge.labelOffset)||{dx:0,dy:0};
       S.labelDrag={eid:edge.id,startPos:{x:pos.x,y:pos.y},offset};
@@ -1941,6 +2099,7 @@ cw.addEventListener('pointerdown',e=>{
     if(edge){
       S.multi=[];S.multiEdges=[];
       S.sel=eid;S.selT='edge';draw();props();
+      if(S.readOnly)return;
       const pos=toSVG(e.clientX,e.clientY);
       S.eDrag={eid,startPos:{x:pos.x,y:pos.y},moved:false};
       mst='eDrag';
@@ -1952,6 +2111,12 @@ cw.addEventListener('pointerdown',e=>{
   if(rzEl&&rzEl.dataset.rzid){
     e.stopPropagation();e.preventDefault();
     const n=byId(rzEl.dataset.rzid);if(!n)return;
+    if(S.readOnly){
+      S.multi=[];S.multiEdges=[];
+      S.sel=n.id;S.selT='node';draw();props();
+      showReadOnlyToast('resize items');
+      return;
+    }
     if(n.locked){
       S.multi=[];S.multiEdges=[];
       S.sel=n.id;S.selT='node';draw();props();
@@ -1981,6 +2146,7 @@ cw.addEventListener('pointerdown',e=>{
     if(!node)return;
 
     if(S.multi.includes(nid)){
+      if(S.readOnly)return;
       const pos=toSVG(e.clientX,e.clientY);
       const movable=S.multi.map(id=>byId(id)).filter(Boolean).filter(n=>!n.locked);
       if(movable.length){
@@ -1989,6 +2155,7 @@ cw.addEventListener('pointerdown',e=>{
     }else{
       S.multi=[];S.multiEdges=[];
       S.sel=nid;S.selT='node';draw();props();
+      if(S.readOnly)return;
       if(node.locked)return;
       const pos=toSVG(e.clientX,e.clientY);
       S.drag={id:nid,ox:pos.x-node.x,oy:pos.y-node.y};
@@ -2177,6 +2344,7 @@ window.addEventListener('pointerup',e=>{
 
 csvg.addEventListener('dblclick',e=>{
   if(e.target.dataset.wpid&&e.target.dataset.wpdx!==undefined){
+    if(blockIfReadOnly('edit bend points'))return;
     const edge=edById(e.target.dataset.wpid);
     if(edge&&edge.wps){edge.wps.splice(+e.target.dataset.wpdx,1);commit();draw();props();}
   }
@@ -2192,6 +2360,7 @@ function cancelConn(){
 }
 
 function showEdgeLabelInput(eid){
+  if(S.readOnly)return;
   const e=edById(eid);
   if(!e)return;
   const fn=byId(e.from),tn=byId(e.to);
@@ -2317,6 +2486,7 @@ window.addEventListener('keydown',e=>{
 
   if((e.key==='Delete'||e.key==='Backspace')&&!inInput){
     e.preventDefault();
+    if(blockIfReadOnly('delete items'))return;
 
     if(S.multi.length||S.multiEdges.length){
       const {unlocked,locked}=getSelectedNodeBuckets();
@@ -2375,6 +2545,7 @@ window.addEventListener('keydown',e=>{
   const ARROW={ArrowLeft:[-4,0],ArrowRight:[4,0],ArrowUp:[0,-4],ArrowDown:[0,4]};
   if(ARROW[e.key]&&!inInput){
     e.preventDefault();
+    if(blockIfReadOnly('move items'))return;
     const [dx,dy]=ARROW[e.key];
     const {unlocked,locked}=getSelectedNodeBuckets();
     unlocked.forEach(n=>{n.x+=dx;n.y+=dy;});
@@ -2392,11 +2563,20 @@ window.addEventListener('keydown',e=>{
     S.multi=S.nodes.map(n=>n.id);S.multiEdges=[];S.sel=null;S.selT=null;draw();return;
   }
 
-  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'){e.preventDefault();undo();}
-  if((e.metaKey||e.ctrlKey)&&(e.key.toLowerCase()==='y'||(e.shiftKey&&e.key.toLowerCase()==='z'))){e.preventDefault();redo();}
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'){
+    e.preventDefault();
+    if(blockIfReadOnly('use undo'))return;
+    undo();
+  }
+  if((e.metaKey||e.ctrlKey)&&(e.key.toLowerCase()==='y'||(e.shiftKey&&e.key.toLowerCase()==='z'))){
+    e.preventDefault();
+    if(blockIfReadOnly('use redo'))return;
+    redo();
+  }
 
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='d'&&!inInput){
     e.preventDefault();
+    if(blockIfReadOnly('duplicate items'))return;
     const {unlocked,locked}=getSelectedNodeBuckets();
     if(!unlocked.length){
       if(locked.length)showLockedSelectionToast('duplicated');
@@ -2430,6 +2610,7 @@ window.addEventListener('keydown',e=>{
 
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='v'&&!inInput){
     e.preventDefault();
+    if(blockIfReadOnly('paste items'))return;
     const doApplyPaste=seedNodes=>{
       if(!seedNodes||!seedNodes.length)return false;
       const pasteNodes=seedNodes.map(n=>({...deepcl(n),x:n.x+32,y:n.y+32}));
@@ -2468,8 +2649,9 @@ window.addEventListener('keydown',e=>{
   }
 });
 
-document.getElementById('bundo').addEventListener('click',undo);
-document.getElementById('bredo').addEventListener('click',redo);
+document.getElementById('bundo').addEventListener('click',()=>{if(blockIfReadOnly('use undo'))return;undo();});
+document.getElementById('bredo').addEventListener('click',()=>{if(blockIfReadOnly('use redo'))return;redo();});
+document.getElementById('breadonly').addEventListener('click',()=>setReadOnly(!S.readOnly,{syncUrl:true,toast:true}));
 const darkToggle=document.getElementById('bdark');
 darkToggle.textContent=document.body.classList.contains('dark')?'Light mode':'Dark mode';
 darkToggle.addEventListener('click',function(){
@@ -2478,6 +2660,7 @@ darkToggle.addEventListener('click',function(){
   draw();
 });
 document.getElementById('bclear').addEventListener('click',async ()=>{
+  if(blockIfReadOnly('clear the canvas'))return;
   const ok=await uiConfirm('Clear all nodes and edges? This cannot be undone with a browser dialog anymore, but your normal undo history stays available until the state changes.','Clear canvas','Clear','Cancel');
   if(!ok)return;
   S.nodes=[];S.edges=[];S.sel=null;S.selT=null;S.multi=[];S.multiEdges=[];cancelConn();
@@ -2491,6 +2674,7 @@ document.getElementById('bzpb').addEventListener('click',()=>AF.zoom(BUTTON_ZOOM
 document.getElementById('bzfb').addEventListener('click',()=>AF.fitAll());
 
 document.getElementById('snap-toggle').addEventListener('click',function(){
+  if(blockIfReadOnly('change snap settings'))return;
   S.snap=!S.snap;
   this.textContent=S.snap?'Snap on':'Snap off';
   this.classList.toggle('on',S.snap);
@@ -2498,6 +2682,7 @@ document.getElementById('snap-toggle').addEventListener('click',function(){
 document.getElementById('snap-toggle').textContent=S.snap?'Snap on':'Snap off';
 document.getElementById('snap-toggle').classList.toggle('on',S.snap);
 document.getElementById('balign').addEventListener('click',()=>{
+  if(blockIfReadOnly('open alignment tools'))return;
   S.alignOpen=!S.alignOpen;
   updateAlignBar();
 });
@@ -2524,6 +2709,7 @@ document.getElementById('bzoom-sel').addEventListener('click',()=>{
 
 document.querySelectorAll('[data-align]').forEach(btn=>{
   btn.addEventListener('click',()=>{
+    if(blockIfReadOnly('align items'))return;
     const {unlocked,locked}=getSelectedNodeBuckets();
     if(!unlocked.length){
       if(locked.length)showLockedSelectionToast('aligned');
@@ -2596,6 +2782,7 @@ function fitAll(){
 }
 
 document.getElementById('blay').addEventListener('click',()=>{
+  if(blockIfReadOnly('run auto layout'))return;
   const reg=S.nodes.filter(n=>n.tp!=='cont'&&n.tp!=='text'&&!n.locked);if(!reg.length){
     showToast('There are no unlocked flow nodes available for auto layout.','info');
     return;
@@ -2930,6 +3117,7 @@ function closeExportModal(){
   expModal.setAttribute('aria-hidden','true');
 }
 function openExportModal(){
+  if(isAppDialogOpen())return;
   if(!S.nodes.length){uiAlert('There is nothing to export yet. Add at least one node first.','Export');return;}
   syncExportModalUI();
   expModal.classList.add('open');
@@ -3000,8 +3188,10 @@ window.addEventListener('pagehide',()=>{
 
 buildSidebar();
 syncProjectTitle();
+syncReadOnlyUi();
 const projectTitleInput=document.getElementById('project-title');
 projectTitleInput?.addEventListener('input',e=>{
+  if(S.readOnly)return;
   S.title=normalizeProjectTitle(e.target.value,'');
   syncProjectTitle(false);
   scheduleAutosave();
@@ -3010,6 +3200,10 @@ projectTitleInput?.addEventListener('keydown',e=>{
   if(e.key==='Enter')e.currentTarget.blur();
 });
 projectTitleInput?.addEventListener('blur',e=>{
+  if(S.readOnly){
+    syncProjectTitle();
+    return;
+  }
   const nextTitle=normalizeProjectTitle(e.target.value,DEFAULT_PROJECT_TITLE);
   if(nextTitle!==S.title){
     S.title=nextTitle;
@@ -3043,5 +3237,305 @@ setTimeout(()=>{
   const h=document.getElementById('hint');
   if(h&&!S.nodes.length)h.style.opacity='0';
 },9000);
+
+
+const _SHARE_EXCELLENT=4096;   // < 4 KB: safe everywhere
+const _SHARE_WARN=16384;       // 4–16 KB: allowed with warning
+                                // > 16 KB: blocked, recommend JSON export
+const _SHARE_ZOOM_MIN=0.12;
+const _SHARE_ZOOM_MAX=5;
+
+function _b64uEncode(bytes){
+  const CHUNK=8192;let binary='';
+  for(let i=0;i<bytes.length;i+=CHUNK)binary+=String.fromCharCode(...bytes.subarray(i,i+CHUNK));
+  return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function _b64uDecode(str){
+  const b64=str.replace(/-/g,'+').replace(/_/g,'/');
+  const padded=b64+'='.repeat((4-(b64.length%4))%4);
+  const binary=atob(padded);
+  const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return bytes;
+}
+
+// ── Compression (deflate-raw via CompressionStream) ───────────────────────────
+async function _compress(str){
+  if(typeof CompressionStream!=='function'){
+    throw new Error('Share links are not supported in this browser because CompressionStream is unavailable. Use JSON export instead.');
+  }
+  const input=new TextEncoder().encode(str);
+  let cs;
+  try{cs=new CompressionStream('deflate-raw');}
+  catch{
+    throw new Error('This browser cannot create ArcFlow share links with the required compression format. Use JSON export instead.');
+  }
+  const w=cs.writable.getWriter();w.write(input);w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+async function _decompress(bytes){
+  if(typeof DecompressionStream!=='function'){
+    throw new Error('This browser cannot open ArcFlow share links because DecompressionStream is unavailable. Open the link in a current supported browser, or ask for a JSON export instead.');
+  }
+  let ds;
+  try{ds=new DecompressionStream('deflate-raw');}
+  catch{
+    throw new Error('This browser cannot decode the compression format used in ArcFlow share links. Ask for a JSON export instead.');
+  }
+  const w=ds.writable.getWriter();w.write(bytes);w.close();
+  return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());
+}
+
+
+function _buildSharePayload(){
+  return{
+    version:1,
+    title:S.title,
+    nodes:deepcl(S.nodes),
+    edges:deepcl(S.edges),
+    nid:S.nid,
+    view:{pan:{x:S.pan.x,y:S.pan.y},zoom:S.zoom},
+  };
+}
+
+async function _encodeShare(){
+  const json=JSON.stringify(_buildSharePayload());
+  const compressed=await _compress(json);
+  const encoded=_b64uEncode(compressed);
+  const url=new URL(window.location.href);
+  url.searchParams.set('share','v1.'+encoded);
+  url.searchParams.delete('readonly');
+  const urlStr=url.toString();
+  return{url:urlStr,urlBytes:urlStr.length,payloadBytes:compressed.length};
+}
+
+async function _decodeShare(param){
+  if(typeof param!=='string'||!param.startsWith('v1.'))
+    throw new Error('Unsupported share link format. Expected a "v1." prefix. The link may be truncated or from a newer version of ArcFlow.');
+  const encoded=param.slice('v1.'.length);
+  if(!encoded)throw new Error('Share link payload is empty.');
+  let bytes;
+  try{bytes=_b64uDecode(encoded);}
+  catch{throw new Error('Share link contains invalid base64 data. It may be corrupted or truncated.');}
+  let json;
+  try{json=await _decompress(bytes);}
+  catch{throw new Error('Share link could not be decompressed. It may be corrupted.');}
+  let raw;
+  try{raw=JSON.parse(json);}
+  catch{throw new Error('Share link payload is not valid JSON.');}
+  return raw;
+}
+
+function _sanitizeShareView(raw){
+  if(!raw||typeof raw!=='object')return null;
+  const{pan,zoom}=raw;
+  if(!pan||typeof pan!=='object')return null;
+  const px=Number.isFinite(+pan.x)?+pan.x:null;
+  const py=Number.isFinite(+pan.y)?+pan.y:null;
+  const z=Number.isFinite(+zoom)?clamp(+zoom,_SHARE_ZOOM_MIN,_SHARE_ZOOM_MAX):null;
+  if(px===null||py===null||z===null)return null;
+  return{pan:{x:px,y:py},zoom:z};
+}
+
+function _sanitizeShareLoad(raw){
+  const base=sanitizeLoad(raw); 
+  const view=_sanitizeShareView(raw?.view);
+  return{...base,view};
+}
+
+function _applyShareState(result){
+  const projectId=generateProjectId();
+  if(result.view){
+    S.pan={...result.view.pan};
+    S.zoom=result.view.zoom;
+    applyProjectState(result,{projectId,fit:false,markClean:false});
+  }else{
+    applyProjectState(result,{projectId,fit:true,markClean:false});
+  }
+  persistActiveProjectNow({createIfMissing:true});
+}
+
+async function _handleShareUrl(){
+  if(!_SHARE_URL_PARAM)return false;
+
+  let raw;
+  try{raw=await _decodeShare(_SHARE_URL_PARAM);}
+  catch(err){
+    uiAlert(err?.message||'The shared link could not be decoded.','Shared link error');
+    return false;
+  }
+
+  if(typeof raw?.version==='number'&&raw.version>1){
+    const proceed=await uiConfirm(
+      'This link was created with a newer version of ArcFlow and may not open correctly. Try anyway?',
+      'Version mismatch','Open anyway','Cancel'
+    );
+    if(!proceed)return false;
+  }
+
+  let result;
+  try{result=_sanitizeShareLoad(raw);}
+  catch(err){
+    uiAlert(err?.message||'The shared diagram is not a valid ArcFlow file.','Shared link error');
+    return false;
+  }
+
+  if(hasProjectContent()){
+    const ok=await uiConfirm(
+      `Open shared diagram "${normalizeProjectTitle(result.title,'Untitled')}"?\n\nThis will replace the current canvas. Unsaved in-memory edits newer than the last autosave will be lost.`,
+      'Open shared diagram','Open','Cancel'
+    );
+    if(!ok)return false;
+  }
+
+  _applyShareState(result);
+  const cleanUrl=new URL(window.location.href);
+  cleanUrl.searchParams.delete('share');
+  history.replaceState(null,'',cleanUrl.toString());
+
+  if(result.warnings.length){
+    uiAlert(
+      'Opened with the following corrections:\n\n'+result.warnings.map(w=>'  — '+w).join('\n'),
+      'Opened with warnings'
+    );
+  }else{
+    showToast('Shared diagram opened.','success');
+  }
+  return true;
+}
+
+function _closeShareModal(){
+  const modal=document.getElementById('share-modal');
+  if(!modal)return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden','true');
+}
+
+function _initShareModal(){
+  if(document.getElementById('share-modal'))return;
+  const el=document.createElement('div');
+  el.id='share-modal';
+  el.setAttribute('aria-hidden','true');
+  el.innerHTML=`
+<div class="share-box" role="dialog" aria-modal="true" aria-labelledby="share-dialog-title">
+  <button class="share-close" id="share-close-btn" type="button" aria-label="Close share dialog">✕</button>
+  <div class="share-kicker">Share</div>
+  <div class="share-title" id="share-dialog-title">Share diagram</div>
+  <div class="share-sub">Generate a link that opens this exact diagram and viewport in supported modern browsers. Links encode the full graph with lossless compression — no server, no storage.</div>
+  <div id="share-modal-body"><div class="share-loading">Building share link…</div></div>
+  <div class="share-actions">
+    <button class="share-json-btn" id="share-export-json-btn" type="button">Export JSON instead</button>
+    <button class="share-done-btn" id="share-done-btn" type="button">Done</button>
+  </div>
+</div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click',e=>{if(e.target===el)_closeShareModal();});
+  document.getElementById('share-close-btn').addEventListener('click',_closeShareModal);
+  document.getElementById('share-done-btn').addEventListener('click',_closeShareModal);
+  document.getElementById('share-export-json-btn').addEventListener('click',()=>{
+    _closeShareModal();
+    document.getElementById('bsave').click();
+  });
+}
+
+async function _openShareModal(){
+  if(isAppDialogOpen())return;
+  if(!S.nodes.length){uiAlert('Add at least one node before sharing.','Nothing to share');return;}
+  _initShareModal();
+  const modal=document.getElementById('share-modal');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden','false');
+
+  const body=document.getElementById('share-modal-body');
+  body.innerHTML='<div class="share-loading">Building share link…</div>';
+
+  let result;
+  try{result=await _encodeShare();}
+  catch(err){
+    body.innerHTML=`<div class="share-status share-status-block">Failed to build share link — ${esc(err?.message||'compression unavailable')}</div>`;
+    return;
+  }
+
+  const{url,urlBytes,payloadBytes}=result;
+  const isBlocked=urlBytes>_SHARE_WARN;
+  const isWarn=!isBlocked&&urlBytes>_SHARE_EXCELLENT;
+  const urlKB=(urlBytes/1024).toFixed(1);
+  const payKB=(payloadBytes/1024).toFixed(1);
+
+  let statusClass,statusMsg;
+  if(isBlocked){
+    statusClass='share-status-block';
+    statusMsg=`This diagram is too large for reliable URL sharing (${urlKB} KB). Some apps silently truncate long links. Export JSON instead for lossless sharing.`;
+  }else if(isWarn){
+    statusClass='share-status-warn';
+    statusMsg=`Link is ${urlKB} KB — it will work in most browsers, but may be truncated in some chat apps or email clients.`;
+  }else{
+    statusClass='share-status-ok';
+    statusMsg=`Link is ${urlKB} KB — short enough to survive copy/paste and messaging reliably.`;
+  }
+
+  const displayUrl=isBlocked?'(diagram too large — use JSON export instead)':url;
+  body.innerHTML=`
+    <div class="share-url-row">
+      <input class="share-url-input" id="share-url-field" type="text" readonly value="${esc(displayUrl)}" aria-label="Share URL"/>
+      <button class="share-copy-btn" id="share-copy-btn" type="button"${isBlocked?' disabled':''}>Copy link</button>
+    </div>
+    <div class="share-stats">
+      <div class="share-stat"><span>Nodes</span><span class="share-stat-val">${S.nodes.length}</span></div>
+      <div class="share-stat"><span>Edges</span><span class="share-stat-val">${S.edges.length}</span></div>
+      <div class="share-stat"><span>Compressed</span><span class="share-stat-val">${payKB} KB</span></div>
+      <div class="share-stat"><span>URL length</span><span class="share-stat-val">${urlKB} KB</span></div>
+    </div>
+    <div class="share-status ${statusClass}">${statusMsg}</div>`;
+
+  if(!isBlocked){
+    document.getElementById('share-copy-btn').addEventListener('click',async()=>{
+      const btn=document.getElementById('share-copy-btn');
+      try{
+        await navigator.clipboard.writeText(url);
+        if(btn)btn.textContent='✓ Copied!';
+        showToast('Share link copied to clipboard.','success');
+      }catch{
+        const field=document.getElementById('share-url-field');
+        if(field){field.select();document.execCommand('copy');}
+        if(btn)btn.textContent='✓ Copied!';
+        showToast('Share link copied.','success');
+      }
+      setTimeout(()=>{const b=document.getElementById('share-copy-btn');if(b)b.textContent='Copy link';},2000);
+    });
+    requestAnimationFrame(()=>document.getElementById('share-copy-btn')?.focus());
+  }
+}
+
+window.addEventListener('keydown',e=>{
+  if(document.getElementById('ui-modal')?.classList.contains('open'))return;
+  const modal=document.getElementById('share-modal');
+  if(e.key==='Escape'&&modal?.classList.contains('open')){e.preventDefault();_closeShareModal();}
+});
+
+window.addEventListener('keydown',e=>{
+  if(document.getElementById('ui-modal')?.classList.contains('open'))return;
+  const tag=document.activeElement?.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA')return;
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='s'){
+    e.preventDefault();_openShareModal();
+  }
+});
+
+(function(){
+  if(document.getElementById('bshare'))return;
+  const expBtn=document.getElementById('bexp');
+  if(!expBtn)return;
+  const btn=document.createElement('button');
+  btn.id='bshare';btn.type='button';
+  btn.className='tbtn tbtn-share';
+  btn.textContent='Share';
+  btn.title='Share diagram via URL (Ctrl+Shift+S)';
+  expBtn.parentElement.insertBefore(btn,expBtn);
+  btn.addEventListener('click',_openShareModal);
+})();
+
+_handleShareUrl();
+
 
 })();

@@ -12,6 +12,8 @@ ArcFlow is a browser-based diagramming tool for building clean node-and-edge flo
 - Customize node, edge, and section colors, including section fill opacity
 - Pan, zoom, and navigate large diagrams with a minimap
 - Keep multiple browser projects with recent autosaved drafts
+- Switch into read-only mode for inspection and demos
+- Share diagrams with compressed URL links in supported modern browsers
 - Save diagrams as JSON and import them back into browser projects
 - Export as SVG, PNG, or JPG
 - Open in-app help with `Ctrl / Cmd + /`
@@ -53,6 +55,8 @@ arcflow/
 - Orthogonal edge routing with bend editing
 - Node alignment, distribution, and width matching
 - Browser-saved recent projects with autosave
+- Read-only mode with toolbar toggle and `?readonly=1`
+- Compressed URL sharing with viewport preservation
 - Section containers for grouped layouts
 - Project title support in the toolbar
 - Custom colors for nodes, edges, and sections
@@ -137,6 +141,8 @@ Built-in node ramps include purple, teal, coral, red, amber, blue, green, gray, 
 ArcFlow targets current versions of Chrome, Firefox, Safari, and Edge with support for Pointer Events, `requestAnimationFrame`, `navigator.clipboard`, and modern ES syntax.
 
 If the system clipboard API is unavailable or denied, ArcFlow falls back to its in-memory clipboard buffer when possible.
+
+URL sharing also depends on `CompressionStream` and `DecompressionStream`. If those are unavailable, JSON export remains the fallback for lossless sharing.
 
 ## License
 
