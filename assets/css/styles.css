@@ -2285,6 +2285,18 @@ body.dark .ct-port circle{
   font-weight:600;
 }
 
+.ui-help-accordion-hint-open{
+  display:none;
+}
+
+.ui-help-accordion[open] .ui-help-accordion-hint-closed{
+  display:none;
+}
+
+.ui-help-accordion[open] .ui-help-accordion-hint-open{
+  display:inline;
+}
+
 .ui-help-align-list{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));

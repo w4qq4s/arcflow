@@ -1871,7 +1871,8 @@ function renderHelpHtml(){
       <details class="ui-help-accordion">
         <summary>
           <span>Align tools</span>
-          <span class="ui-help-accordion-hint">Expand</span>
+          <span class="ui-help-accordion-hint ui-help-accordion-hint-closed">Expand</span>
+          <span class="ui-help-accordion-hint ui-help-accordion-hint-open">Collapse</span>
         </summary>
         <div class="ui-help-align-list">
           ${ALIGN_HELP_ITEMS.map(([title,desc])=>`
