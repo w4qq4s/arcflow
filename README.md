@@ -5,12 +5,14 @@ ArcFlow is a browser-based diagramming tool for building clean node-and-edge flo
 ## Highlights
 
 - Drag nodes from the sidebar onto the canvas
-- Connect nodes by hovering to reveal port handles
+- Connect nodes by dragging from a source handle to a target port, or click a target node as fallback
+- Box-select nodes and edges together on the canvas
 - Bend edges and snap them into clean orthogonal paths
 - Align, distribute, and group nodes inside section containers
 - Customize node, edge, and section colors, including section fill opacity
 - Pan, zoom, and navigate large diagrams with a minimap
-- Save and load diagrams as JSON
+- Keep multiple browser projects with recent autosaved drafts
+- Save diagrams as JSON and import them back into browser projects
 - Export as SVG, PNG, or JPG
 - Open in-app help with `Ctrl / Cmd + /`
 
@@ -45,17 +47,23 @@ arcflow/
 ## Features
 
 - Drag-and-drop canvas editing
+- Box selection for nodes and edges
+- Drag-to-connect node linking with click fallback
 - Inline edge labeling
 - Orthogonal edge routing with bend editing
 - Node alignment, distribution, and width matching
+- Browser-saved recent projects with autosave
 - Section containers for grouped layouts
 - Project title support in the toolbar
 - Custom colors for nodes, edges, and sections
 - Fill-opacity control for section containers
+- Lock and unlock nodes or sections to block edits
+- Draggable edge labels with route and label reset actions
 - Dark and light mode
 - Touch pinch zoom
 - Minimap navigation
 - Auto-layout for flow-style diagrams
+- Advanced export controls for scale, padding, background mode, and JPG quality
 - Transparent SVG and PNG export
 - JSON save and load with schema sanitisation
 
@@ -79,7 +87,12 @@ arcflow/
 
 ## Saving and loading
 
-Diagrams are saved as `.json` files downloaded to your machine. The default filename uses the current project title when available, or `arcflow-diagram.json` otherwise.
+ArcFlow now supports two persistence flows:
+
+- **Browser projects**: recent diagrams are autosaved in `localStorage` and can be reopened from the `Load` dialog
+- **JSON files**: diagrams can still be downloaded as `.json` files and imported back in later
+
+The default JSON filename uses the current project title when available, or `arcflow-diagram.json` otherwise.
 
 Saved files include:
 
@@ -87,6 +100,7 @@ Saved files include:
 - Nodes
 - Edges
 - The current id counter
+- Lock state and edge label offsets
 
 Imported files are validated and sanitised before being applied, so malformed fields, duplicate ids, and dangling edges are rejected or corrected instead of being trusted directly.
 
@@ -95,10 +109,10 @@ Imported files are validated and sanitised before being applied, so malformed fi
 ArcFlow exports the current diagram as:
 
 - **SVG**: vector output with a transparent background
-- **PNG**: raster export at 2x resolution with a transparent background
-- **JPG**: raster export at 2x resolution with an opaque background matching the current theme
+- **PNG**: raster export with configurable scale and optional transparent, theme, or white background
+- **JPG**: raster export with configurable scale, padding, and quality using an opaque background
 
-Export bounds are calculated from node and edge geometry, including waypoints and edge labels. Text annotation nodes are excluded unless they are the only nodes present.
+Export bounds are calculated from node and edge geometry, including waypoints and draggable edge labels. Text annotation nodes are excluded unless they are the only nodes present.
 
 ## Node types
 
