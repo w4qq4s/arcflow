@@ -30,6 +30,9 @@ const MAX_BROWSER_PROJECTS=10;
 const AUTOSAVE_DELAY=900;
 const READ_ONLY_QUERY_VALUE=new URLSearchParams(window.location.search).get('readonly');
 const _SHARE_URL_PARAM=new URLSearchParams(window.location.search).get('share');
+const PHONE_BLOCK_MAX_SHORT_SIDE=520;
+const PHONE_BLOCK_MAX_LONG_SIDE=980;
+const PHONE_UA_RE=/(Android.+Mobile|iPhone|iPod|Windows Phone|IEMobile|Opera Mini|webOS|BlackBerry|Mobile\b)/i;
 
 const PAL=[
   {cat:'Orchestration',items:[
@@ -100,6 +103,43 @@ function normalizeProjectTitle(v,fallback=''){
   if(typeof v!=='string')return fallback;
   const s=v.replace(/\s+/g,' ').trim().slice(0,120);
   return s||fallback;
+}
+function isProbablyPhoneClient(){
+  const ua=navigator.userAgent||'';
+  const uaDataMobile=typeof navigator.userAgentData?.mobile==='boolean' ? navigator.userAgentData.mobile : false;
+  const mobileUa=PHONE_UA_RE.test(ua);
+  const coarse=window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const shortSide=Math.min(window.innerWidth||screen.width||0,window.innerHeight||screen.height||0);
+  const longSide=Math.max(window.innerWidth||screen.width||0,window.innerHeight||screen.height||0);
+  return !!(uaDataMobile || mobileUa || (coarse && shortSide<=PHONE_BLOCK_MAX_SHORT_SIDE && longSide<=PHONE_BLOCK_MAX_LONG_SIDE));
+}
+function syncPhoneGuard(){
+  const blocked=isProbablyPhoneClient();
+  document.body.classList.toggle('phone-blocked',blocked);
+  const guard=document.getElementById('phone-guard');
+  const meta=document.getElementById('phone-guard-meta');
+  const app=document.getElementById('app');
+  if(guard){
+    guard.hidden=!blocked;
+    guard.setAttribute('aria-hidden',blocked?'false':'true');
+  }
+  if(app)app.setAttribute('aria-hidden',blocked?'true':'false');
+  if(meta){
+    const size=`${Math.round(window.innerWidth||0)} × ${Math.round(window.innerHeight||0)}`;
+    meta.textContent=blocked
+      ? `Detected a phone-sized mobile device (${size}). Please switch to a desktop or laptop browser.`
+      : '';
+  }
+  if(!blocked)return;
+  document.getElementById('load-modal')?.classList.remove('open');
+  document.getElementById('exp-modal')?.classList.remove('open');
+  document.getElementById('ui-modal')?.classList.remove('open');
+  document.getElementById('share-modal')?.classList.remove('open');
+  document.getElementById('load-modal')?.setAttribute('aria-hidden','true');
+  document.getElementById('exp-modal')?.setAttribute('aria-hidden','true');
+  document.getElementById('ui-modal')?.setAttribute('aria-hidden','true');
+  document.getElementById('share-modal')?.setAttribute('aria-hidden','true');
+  document.activeElement?.blur?.();
 }
 function isReadOnly(){
   return !!S.readOnly;
@@ -1847,6 +1887,7 @@ function renderHelpHtml(){
         <div class="ui-help-credits-title">Credits</div>
         <div class="ui-help-credits-copy">Built by Waqqas</div>
         <div class="ui-help-credit-links">
+          <a class="ui-help-credit-link" href="https://github.com/w4qq4s/arcflow" target="_blank" rel="noreferrer">ArcFlow repository</a>
           <a class="ui-help-credit-link" href="https://github.com/w4qq4s" target="_blank" rel="noreferrer">GitHub</a>
           <a class="ui-help-credit-link" href="https://www.linkedin.com/in/waqqas-h-937a91382/" target="_blank" rel="noreferrer">LinkedIn</a>
           <span class="ui-help-credit-meta">MIT License</span>
@@ -3187,6 +3228,10 @@ window.addEventListener('pagehide',()=>{
 });
 
 buildSidebar();
+syncPhoneGuard();
+window.addEventListener('resize',syncPhoneGuard,{passive:true});
+window.addEventListener('orientationchange',syncPhoneGuard);
+window.visualViewport?.addEventListener('resize',syncPhoneGuard);
 syncProjectTitle();
 syncReadOnlyUi();
 const projectTitleInput=document.getElementById('project-title');

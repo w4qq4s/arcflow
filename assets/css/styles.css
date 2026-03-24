@@ -52,6 +52,75 @@ body{
   -moz-osx-font-smoothing:grayscale;
 }
 
+#phone-guard{
+  position:fixed;
+  inset:0;
+  z-index:12000;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:
+    radial-gradient(circle at top,rgba(var(--acc-rgb),.14),transparent 36%),
+    linear-gradient(180deg,rgba(0,0,0,.5),rgba(0,0,0,.72));
+}
+
+.phone-guard-card{
+  width:min(100%,460px);
+  padding:26px 24px;
+  background:var(--bg1);
+  border:1px solid var(--b2);
+  border-radius:var(--r4);
+  box-shadow:var(--shadow);
+}
+
+.phone-guard-kicker{
+  color:var(--acc);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+
+.phone-guard-title{
+  margin-top:10px;
+  color:var(--t1);
+  font-size:26px;
+  line-height:1.1;
+  font-weight:700;
+}
+
+.phone-guard-copy{
+  margin-top:12px;
+  color:var(--t2);
+  font-size:14px;
+  line-height:1.7;
+}
+
+.phone-guard-meta{
+  margin-top:16px;
+  padding:10px 12px;
+  background:var(--bg2);
+  border:1px solid var(--b3);
+  border-radius:var(--r3);
+  color:var(--t3);
+  font-size:12px;
+  line-height:1.55;
+}
+
+body.phone-blocked #phone-guard{
+  display:flex;
+}
+
+body.phone-blocked #app,
+body.phone-blocked #load-modal,
+body.phone-blocked #exp-modal,
+body.phone-blocked #ui-modal,
+body.phone-blocked #share-modal,
+body.phone-blocked #toast-wrap{
+  display:none !important;
+}
+
 button,input,textarea,select{font:inherit}
 
 #app{
@@ -651,6 +720,7 @@ body.dark #connbanner{
 
 .zb,
 #mmtoggle,
+#repofab,
 #helpfab{
   width:28px;
   height:28px;
@@ -668,11 +738,20 @@ body.dark #connbanner{
 
 body.dark .zb,
 body.dark #mmtoggle,
+body.dark #repofab,
 body.dark #helpfab{
   background:rgba(21,26,32,.96);
 }
 
 .zb-fit{width:36px;font-size:11px}
+
+#repofab{
+  position:absolute;
+  right:182px;
+  bottom:124px;
+  z-index:10;
+  text-decoration:none;
+}
 
 #helpfab{
   position:absolute;
@@ -681,6 +760,7 @@ body.dark #helpfab{
   z-index:10;
 }
 
+#repofab svg,
 #helpfab svg{
   width:15px;
   height:15px;
@@ -691,6 +771,12 @@ body.dark #helpfab{
   stroke-linejoin:round;
 }
 
+#repofab svg{
+  fill:currentColor;
+  stroke:none;
+}
+
+#repofab:hover,
 #helpfab:hover{
   color:var(--t1);
   border-color:rgba(var(--acc-rgb),.28);
@@ -2299,6 +2385,7 @@ body.dark .ct-port circle{
     max-height:calc(100dvh - 28px);
   }
 
+  #repofab,
   #helpfab{
     right:145px;
   }
