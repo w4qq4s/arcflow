@@ -1876,7 +1876,10 @@ body.dark #minimap{background:rgba(21,26,32,.96)}
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
 
-.elabel-bg{fill:var(--bg1)}
+.elabel-bg{
+  fill:var(--bg1);
+  pointer-events:none;
+}
 .elabel-hit{
   fill:transparent;
   cursor:move;
@@ -1951,7 +1954,15 @@ body.dark .ct-port circle{
   fill:rgba(var(--acc-rgb),.24)!important;
 }
 
-.rz-h{fill:transparent;cursor:nwse-resize}
+.rz-h{fill:transparent}
+.rz-h-br,
+.rz-h-tl{cursor:nwse-resize}
+.rz-h-tr,
+.rz-h-bl{cursor:nesw-resize}
+.rz-h-t,
+.rz-h-b{cursor:ns-resize}
+.rz-h-l,
+.rz-h-r{cursor:ew-resize}
 
 .ep{
   fill:none;

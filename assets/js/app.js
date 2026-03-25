@@ -239,6 +239,13 @@ function normalizeLabelOffset(v){
   if(Math.abs(dx)<0.001&&Math.abs(dy)<0.001)return null;
   return{dx,dy};
 }
+function normalizeLabelAnchor(v){
+  if(!v||typeof v!=='object')return null;
+  const segment=Number.isFinite(+v.segment)?Math.max(0,Math.floor(+v.segment)):null;
+  const t=Number.isFinite(+v.t)?clamp(+v.t,0,1):null;
+  if(segment===null||t===null)return null;
+  return{segment,t};
+}
 
 function deepcl(o){return JSON.parse(JSON.stringify(o));}
 function snapshotState(){return{nodes:S.nodes,edges:S.edges,title:S.title,nid:S.nid};}
@@ -326,6 +333,7 @@ function _sanitizeEdge(e, nodeIds) {
     wps,
     label: typeof e.label === 'string' ? e.label.slice(0, 200) : null,
     customColor:normalizeHexColor(e.customColor),
+    labelAnchor:normalizeLabelAnchor(e.labelAnchor),
     labelOffset:normalizeLabelOffset(e.labelOffset),
   };
 }
@@ -924,6 +932,24 @@ function snapWaypointPosition(edge,idx,pos){
   }
   return{x,y,guides};
 }
+function captureMovedEdgeWaypoints(nodeIds){
+  const moved=new Set(nodeIds||[]);
+  if(!moved.size)return[];
+  return S.edges
+    .filter(edge=>moved.has(edge.from)&&moved.has(edge.to)&&Array.isArray(edge.wps)&&edge.wps.length)
+    .map(edge=>({
+      id:edge.id,
+      wps:edge.wps.map(wp=>({x:wp.x,y:wp.y}))
+    }));
+}
+function applyMovedEdgeWaypoints(origins,dx,dy){
+  if(!origins?.length)return;
+  origins.forEach(({id,wps})=>{
+    const edge=edById(id);
+    if(!edge||!Array.isArray(edge.wps)||edge.wps.length!==wps.length)return;
+    edge.wps=wps.map(wp=>({x:wp.x+dx,y:wp.y+dy}));
+  });
+}
 function pushRoutePoint(route,point,insertIndex){
   const prev=route.points[route.points.length-1];
   if(prev&&prev.x===point.x&&prev.y===point.y)return;
@@ -995,11 +1021,49 @@ function edgeCenterPoint(points){
   const mi=Math.floor((points.length-1)/2);
   return{x:(points[mi].x+points[mi+1].x)/2,y:(points[mi].y+points[mi+1].y)/2};
 }
+function pointAlongSegment(a,b,t){
+  return{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+}
+function defaultLabelAnchor(points){
+  if(!points||points.length<2)return null;
+  const segment=Math.floor((points.length-1)/2);
+  return{segment,t:0.5};
+}
+function edgeLabelBasePoint(edge,points){
+  if(!points||points.length<2)return null;
+  const fallback=defaultLabelAnchor(points);
+  const anchor=normalizeLabelAnchor(edge.labelAnchor);
+  const resolved=anchor&&anchor.segment<points.length-1?anchor:fallback;
+  if(!resolved)return null;
+  const a=points[resolved.segment];
+  const b=points[resolved.segment+1];
+  if(!a||!b)return null;
+  return pointAlongSegment(a,b,resolved.t);
+}
+function projectPointToSegment(a,b,p){
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const lenSq=dx*dx+dy*dy;
+  if(lenSq<0.0001)return{point:{x:a.x,y:a.y},t:0,distSq:(p.x-a.x)**2+(p.y-a.y)**2};
+  const t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/lenSq,0,1);
+  const point=pointAlongSegment(a,b,t);
+  return{point,t,distSq:(p.x-point.x)**2+(p.y-point.y)**2};
+}
+function projectPointToRoute(points,p){
+  if(!points||points.length<2)return null;
+  let best=null;
+  for(let i=0;i<points.length-1;i++){
+    const projected=projectPointToSegment(points[i],points[i+1],p);
+    if(!best||projected.distSq<best.distSq){
+      best={segment:i,t:projected.t,point:projected.point,distSq:projected.distSq};
+    }
+  }
+  return best;
+}
 function edgeLabelPoint(edge,points){
-  const mid=edgeCenterPoint(points);
-  if(!mid)return null;
+  const base=edgeLabelBasePoint(edge,points);
+  if(!base)return null;
   const offset=normalizeLabelOffset(edge.labelOffset)||{dx:0,dy:0};
-  return{x:mid.x+offset.dx,y:mid.y+offset.dy};
+  return{x:base.x+offset.dx,y:base.y+offset.dy};
 }
 function pointInRect(point,rect){
   return point.x>=rect.left&&point.x<=rect.right&&point.y>=rect.top&&point.y<=rect.bottom;
@@ -1059,6 +1123,20 @@ function edgeIntersectsSelectionRect(edge,rect){
   const labelRect=edgeLabelRect(edge,points);
   return !!(labelRect&&rectsOverlap(rect,labelRect));
 }
+function findEdgeLabelAtPoint(point){
+  if(!point)return null;
+  for(let i=S.edges.length-1;i>=0;i--){
+    const edge=S.edges[i];
+    if(!edge.label)continue;
+    const fn=byId(edge.from),tn=byId(edge.to);
+    if(!fn||!tn)continue;
+    const fp=ports(fn)[edge.fp],tp=ports(tn)[edge.tp];
+    if(!fp||!tp)continue;
+    const rect=edgeLabelRect(edge,edgePolylinePoints(fp,tp,edge.wps||[],edge.fp,edge.tp));
+    if(rect&&pointInRect(point,rect))return edge;
+  }
+  return null;
+}
 function mkPath(fp,tp,wps,fpSide,tpSide){
   return'M'+edgePolylinePoints(fp,tp,wps,fpSide,tpSide).map(p=>`${Math.round(p.x)} ${Math.round(p.y)}`).join('L');
 }
@@ -1107,11 +1185,21 @@ function drawContainers(){
     const visuals=resolveNodeVisuals(n);
     const lsz=10, lthk=2.5;
     const lpath=`M${rx-lsz} ${ry-lthk/2}L${rx-lthk/2} ${ry-lthk/2}L${rx-lthk/2} ${ry-lsz}`;
+    const handles=(n.locked||S.readOnly)?'':[
+      {corner:'tl',x:n.x-9,y:n.y-9},
+      {corner:'t',x:n.x+n.w/2-9,y:n.y-9},
+      {corner:'tr',x:rx-9,y:n.y-9},
+      {corner:'l',x:n.x-9,y:n.y+n.h/2-9},
+      {corner:'r',x:rx-9,y:n.y+n.h/2-9},
+      {corner:'bl',x:n.x-9,y:ry-9},
+      {corner:'b',x:n.x+n.w/2-9,y:ry-9},
+      {corner:'br',x:rx-9,y:ry-9},
+    ].map(handle=>`<rect class="rz-h rz-h-${handle.corner}" x="${handle.x}" y="${handle.y}" width="18" height="18" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" data-rzcorner="${handle.corner}" pointer-events="all"/>`).join('');
     h+=`<g class="cont-g${sel?' sel':''}${n.locked?' locked':''}" data-nid="${escAttr(n.id)}" data-cont="1">
 <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${SECTION_RX}" fill="${visuals.fill}" stroke="${visuals.stroke}" stroke-width="${sel?2:1}" stroke-dasharray="7 4"/>
 <text class="nt" x="${n.x+14}" y="${n.y+17}" font-size="12" font-weight="500" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.title}">${esc(n.title)}</text>
 ${n.sub?`<text class="ns" x="${n.x+14}" y="${n.y+32}" font-size="10" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.sub}">${esc(n.sub)}</text>`:''}
-${(n.locked||S.readOnly)?'':`<rect class="rz-h" x="${rx-22}" y="${ry-22}" width="22" height="22" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" pointer-events="all"/>`}
+${handles}
 <path d="${lpath}" fill="none" stroke="${mixHex(visuals.stroke,themeColors().bg2,0.35)}" stroke-width="${lthk}" stroke-linecap="round" pointer-events="none" opacity=".82"/>
 ${n.locked?renderLockBadge(n.x+n.w-26,n.y+10,visuals.stroke):''}
 </g>`;
@@ -1208,8 +1296,10 @@ function drawOverlay(){
         const wps=e.wps||[];
         const route=buildEdgeRoute(fp,tp,wps,e.fp,e.tp);
         const pts=route.points;
+        const labelRect=edgeLabelRect(e,pts);
         for(let i=0;i<pts.length-1;i++){
           const mx=(pts[i].x+pts[i+1].x)/2,my=(pts[i].y+pts[i+1].y)/2;
+          if(labelRect&&pointInRect({x:mx,y:my},labelRect))continue;
           h+=`<circle class="wp-add" cx="${mx}" cy="${my}" r="5" data-wpadd="${escAttr(e.id)}" data-wpi="${route.insertIndices[i]??wps.length}" pointer-events="all"/>`;
         }
         wps.forEach((wp,i)=>{
@@ -1539,7 +1629,7 @@ ${hasCustomColor?`<input class="pri pr-color-input" id="ecustom" type="color" va
     ${e.label?`<button class="tbb" type="button" id="elabelreset">Reset label position</button>`:''}
   </div>
 </div>
-${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to move bend points. Double-click a handle to delete it.</div>`:''}
+${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to move bend points. Drag a label onto any routed segment to place it there.</div>`:`<div class="tip">Drag a label onto any routed segment to choose which bend segment it sits on. Double-click a blue handle to delete a bend point.</div>`}
 <button class="delbtn" id="edel">Delete edge</button>`;
 
     const lblI=document.getElementById('elbl');
@@ -1578,7 +1668,7 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
       commit();draw();props();
     });
     document.getElementById('ereset')?.addEventListener('pointerdown',()=>{e.wps=[];commit();draw();props();});
-    document.getElementById('elabelreset')?.addEventListener('pointerdown',()=>{e.labelOffset=null;commit();draw();props();});
+    document.getElementById('elabelreset')?.addEventListener('pointerdown',()=>{e.labelAnchor=null;e.labelOffset=null;commit();draw();props();});
     document.getElementById('edel')?.addEventListener('pointerdown',()=>{
       if(isEdgeEndpointLocked(e,'from')||isEdgeEndpointLocked(e,'to')){
         showToast('Edges connected to locked items cannot be deleted.','info');
@@ -2008,7 +2098,7 @@ function createConnectionFromConn(targetId,targetPort=null){
   }
   const tp=targetPort||nearPort(S.conn.fromPos,targetNode);
   const eid='e'+(S.nid++);
-  S.edges.push({id:eid,from:S.conn.fromId,fp:S.conn.fromPort,to:targetId,tp,dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null});
+  S.edges.push({id:eid,from:S.conn.fromId,fp:S.conn.fromPort,to:targetId,tp,dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null});
   S.sel=eid;S.selT='edge';
   commit();
   cancelConn();
@@ -2070,6 +2160,19 @@ cw.addEventListener('pointerdown',e=>{
     beginPan(e);return;
   }
   const t=e.target;
+  const pos=toSVG(e.clientX,e.clientY);
+
+  const labelEdge=findEdgeLabelAtPoint(pos);
+  if(labelEdge){
+    e.stopPropagation();e.preventDefault();
+    const alreadySelected=S.sel===labelEdge.id&&S.selT==='edge';
+    S.multi=[];S.multiEdges=[];
+    S.sel=labelEdge.id;S.selT='edge';draw();props();
+    if(!alreadySelected||S.readOnly)return;
+    S.labelDrag={eid:labelEdge.id};
+    mst='labelDrag';
+    return;
+  }
 
   const pb=t.closest('.pb');
   if(pb){
@@ -2108,7 +2211,6 @@ cw.addEventListener('pointerdown',e=>{
   if(t.dataset.wpadd&&t.dataset.wpi!==undefined){
     e.stopPropagation();e.preventDefault();
     if(blockIfReadOnly('reroute edges'))return;
-    const pos=toSVG(e.clientX,e.clientY);
     const edge=edById(t.dataset.wpadd);
     if(edge){
       if(!edge.wps)edge.wps=[];
@@ -2119,17 +2221,16 @@ cw.addEventListener('pointerdown',e=>{
     return;
   }
 
-  if(t.dataset.elblid){
+  const labelTarget=t.closest?.('[data-elblid]');
+  if(labelTarget){
     e.stopPropagation();e.preventDefault();
-    const edge=edById(t.dataset.elblid);
+    const edge=edById(labelTarget.dataset.elblid);
     if(edge){
       const alreadySelected=S.sel===edge.id&&S.selT==='edge';
       S.multi=[];S.multiEdges=[];
       S.sel=edge.id;S.selT='edge';draw();props();
       if(!alreadySelected||S.readOnly)return;
-      const pos=toSVG(e.clientX,e.clientY);
-      const offset=normalizeLabelOffset(edge.labelOffset)||{dx:0,dy:0};
-      S.labelDrag={eid:edge.id,startPos:{x:pos.x,y:pos.y},offset};
+      S.labelDrag={eid:edge.id};
       mst='labelDrag';
     }
     return;
@@ -2166,8 +2267,17 @@ cw.addEventListener('pointerdown',e=>{
       return;
     }
     const pos=toSVG(e.clientX,e.clientY);
-
-    S.drag={id:n.id,resize:true,cx:pos.x,cy:pos.y,iw:n.w,ih:n.h};
+    S.drag={
+      id:n.id,
+      resize:true,
+      corner:rzEl.dataset.rzcorner||'br',
+      cx:pos.x,
+      cy:pos.y,
+      ix:n.x,
+      iy:n.y,
+      iw:n.w,
+      ih:n.h
+    };
     S.sel=n.id;S.selT='node';
     mst='drag';dragMoved=false;draw();props();return;
   }
@@ -2192,15 +2302,24 @@ cw.addEventListener('pointerdown',e=>{
       const pos=toSVG(e.clientX,e.clientY);
       const movable=S.multi.map(id=>byId(id)).filter(Boolean).filter(n=>!n.locked);
       if(movable.length){
-        S.drag={multi:true,offsets:movable.map(n=>({id:n.id,ox:pos.x-n.x,oy:pos.y-n.y}))};
+        S.drag={
+          multi:true,
+          offsets:movable.map(n=>({id:n.id,ox:pos.x-n.x,oy:pos.y-n.y})),
+          originNodes:movable.map(n=>({id:n.id,x:n.x,y:n.y})),
+          edgeWaypointOrigins:captureMovedEdgeWaypoints(movable.map(n=>n.id))
+        };
       }
     }else{
       S.multi=[];S.multiEdges=[];
       S.sel=nid;S.selT='node';draw();props();
       if(S.readOnly)return;
       if(node.locked)return;
-      const pos=toSVG(e.clientX,e.clientY);
-      S.drag={id:nid,ox:pos.x-node.x,oy:pos.y-node.y};
+      S.drag={id:nid,ox:pos.x-node.x,oy:pos.y-node.y,originX:node.x,originY:node.y};
+      if(node.tp==='cont'){
+        const movableChildren=getContainerChildren(node.id).filter(c=>!c.locked);
+        S.drag.childOffsets=movableChildren.map(c=>({id:c.id,ox:c.x-node.x,oy:c.y-node.y}));
+        S.drag.edgeWaypointOrigins=captureMovedEdgeWaypoints(movableChildren.map(c=>c.id));
+      }
     }
     if(!S.drag)return;
     mst='drag';dragMoved=false;return;
@@ -2209,7 +2328,6 @@ cw.addEventListener('pointerdown',e=>{
   if(e.button===0){
 
     S.sel=null;S.selT=null;
-    const pos=toSVG(e.clientX,e.clientY);
     S.rubber={x0:pos.x,y0:pos.y,x1:pos.x,y1:pos.y};
     mst='rubber';
     if(S.multi.length||S.multiEdges.length){S.multi=[];S.multiEdges=[];draw();}else{draw();}
@@ -2222,24 +2340,61 @@ window.addEventListener('pointermove',e=>{
     if(S.drag.multi){
       S.guides=[];
       S.drag.offsets.forEach(({id,ox,oy})=>{const n=byId(id);if(n){n.x=snapV(pos.x-ox);n.y=snapV(pos.y-oy);}});
+      const leadOrigin=S.drag.originNodes?.[0];
+      const leadNode=leadOrigin?byId(leadOrigin.id):null;
+      if(leadNode){
+        applyMovedEdgeWaypoints(
+          S.drag.edgeWaypointOrigins,
+          leadNode.x-leadOrigin.x,
+          leadNode.y-leadOrigin.y
+        );
+      }
       dragMoved=true;draw();
     }else{
       const n=byId(S.drag.id);if(!n)return;
       if(S.drag.resize){
         S.guides=[];
-        const dx=pos.x-S.drag.cx, dy=pos.y-S.drag.cy;
-        n.w=Math.max(80,snapV(S.drag.iw+dx));
-        n.h=Math.max(50,snapV(S.drag.ih+dy));
+        if(n.tp==='cont'){
+          const right=S.drag.ix+S.drag.iw;
+          const bottom=S.drag.iy+S.drag.ih;
+          const corner=S.drag.corner||'br';
+          if(corner.includes('l')){
+            n.x=Math.min(right-80,snapV(pos.x));
+            n.w=right-n.x;
+          }else if(corner.includes('r')){
+            n.x=S.drag.ix;
+            n.w=Math.max(80,snapV(pos.x-S.drag.ix));
+          }else{
+            n.x=S.drag.ix;
+            n.w=S.drag.iw;
+          }
+          if(corner.includes('t')){
+            n.y=Math.min(bottom-50,snapV(pos.y));
+            n.h=bottom-n.y;
+          }else if(corner.includes('b')){
+            n.y=S.drag.iy;
+            n.h=Math.max(50,snapV(pos.y-S.drag.iy));
+          }else{
+            n.y=S.drag.iy;
+            n.h=S.drag.ih;
+          }
+        }else{
+          const dx=pos.x-S.drag.cx, dy=pos.y-S.drag.cy;
+          n.w=Math.max(80,snapV(S.drag.iw+dx));
+          n.h=Math.max(50,snapV(S.drag.ih+dy));
+        }
       }else{
         let nx=snapV(pos.x-S.drag.ox),ny=snapV(pos.y-S.drag.oy);
         const aligned=smartAlignRect(rectAt(nx,ny,n.w,n.h),new Set([n.id]));
         nx=aligned.x;ny=aligned.y;S.guides=aligned.guides;
 
-        if(n.tp==='cont'&&dragMoved===false){
-          S.drag.childOffsets=getContainerChildren(n.id).filter(c=>!c.locked).map(c=>({id:c.id,ox:c.x-n.x,oy:c.y-n.y}));
-        }
         if(n.tp==='cont'&&S.drag.childOffsets){
           S.drag.childOffsets.forEach(({id,ox,oy})=>{const c=byId(id);if(c){c.x=nx+ox;c.y=ny+oy;}});
+          applyMovedEdgeWaypoints(
+            S.drag.edgeWaypointOrigins,
+            nx-S.drag.originX,
+            ny-S.drag.originY
+          );
         }
         n.x=nx;n.y=ny;dragMoved=true;
       }
@@ -2249,11 +2404,17 @@ window.addEventListener('pointermove',e=>{
     const pos=toSVG(e.clientX,e.clientY);
     const edge=edById(S.labelDrag.eid);
     if(edge){
-      edge.labelOffset=normalizeLabelOffset({
-        dx:S.labelDrag.offset.dx+(pos.x-S.labelDrag.startPos.x),
-        dy:S.labelDrag.offset.dy+(pos.y-S.labelDrag.startPos.y)
-      });
-      draw();
+      const fn=byId(edge.from),tn=byId(edge.to);
+      if(fn&&tn){
+        const fp=ports(fn)[edge.fp],tp=ports(tn)[edge.tp];
+        const points=edgePolylinePoints(fp,tp,edge.wps||[],edge.fp,edge.tp);
+        const projected=projectPointToRoute(points,pos);
+        if(projected){
+          edge.labelAnchor={segment:projected.segment,t:projected.t};
+          edge.labelOffset=null;
+          draw();
+        }
+      }
     }
   }else if(mst==='pan'&&panStart){
     S.guides=[];
@@ -2871,19 +3032,19 @@ document.getElementById('bex').addEventListener('click',async ()=>{
       {id:'t1',tp:'text',ramp:'text',x:-130,y:680,w:260,h:36,title:'↻ Feeds back to coordinator',sub:'',prompt:'',customColor:null,fillOpacity:1,locked:false},
     ],
     edges:[
-      {id:'e1',from:'n1',fp:'bottom',to:'n2',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e2',from:'n1',fp:'bottom',to:'n3',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e3',from:'n1',fp:'bottom',to:'n4',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e4',from:'n2',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e5',from:'n3',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e6',from:'n4',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e7',from:'n5',fp:'bottom',to:'n6',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e8',from:'n5',fp:'bottom',to:'n7',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e9',from:'n6',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e10',from:'n7',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelOffset:null},
-      {id:'e11',from:'n8',fp:'bottom',to:'n9',tp:'top',dash:false,col:'green',wps:[],label:'path blocked',customColor:null,labelOffset:null},
-      {id:'e12',from:'n8',fp:'bottom',to:'n10',tp:'top',dash:false,col:'red',wps:[],label:'still open',customColor:null,labelOffset:null},
-      {id:'e13',from:'n9',fp:'right',to:'n1',tp:'left',dash:true,col:null,wps:[],label:null,customColor:null,labelOffset:null},
+      {id:'e1',from:'n1',fp:'bottom',to:'n2',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e2',from:'n1',fp:'bottom',to:'n3',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e3',from:'n1',fp:'bottom',to:'n4',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e4',from:'n2',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e5',from:'n3',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e6',from:'n4',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e7',from:'n5',fp:'bottom',to:'n6',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e8',from:'n5',fp:'bottom',to:'n7',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e9',from:'n6',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e10',from:'n7',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e11',from:'n8',fp:'bottom',to:'n9',tp:'top',dash:false,col:'green',wps:[],label:'path blocked',customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e12',from:'n8',fp:'bottom',to:'n10',tp:'top',dash:false,col:'red',wps:[],label:'still open',customColor:null,labelAnchor:null,labelOffset:null},
+      {id:'e13',from:'n9',fp:'right',to:'n1',tp:'left',dash:true,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
     ]
   };
   const projectId=S.activeProjectId||generateProjectId();
