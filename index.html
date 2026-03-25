@@ -165,22 +165,56 @@
     <div class="load-head">
       <div class="load-kicker">Projects</div>
       <div class="load-title" id="load-title">Load project</div>
-      <div class="load-subtitle" id="load-subtitle">Open an autosaved browser project or import a JSON file from disk.</div>
+      <div class="load-subtitle" id="load-subtitle">Open an autosaved browser project, choose a JSON file, or paste ArcFlow JSON directly.</div>
     </div>
     <div class="load-toolbar">
       <button class="load-btn load-btn-primary" id="load-new" type="button">New blank project</button>
       <button class="load-btn" id="load-import" type="button">Import JSON</button>
     </div>
+    <div class="load-import-wrap" id="load-import-wrap">
+      <div class="load-import-card">
+        <div class="load-import-head">
+          <div class="load-import-title">Import ArcFlow JSON</div>
+          <div class="load-import-copy">Upload a JSON file or paste a full project export directly into the modal.</div>
+        </div>
+        <div class="load-import-toolbar">
+          <button class="load-btn" id="load-import-file" type="button">Upload JSON</button>
+          <div class="load-import-copy load-import-copy-inline">Uploaded or pasted JSON can replace the current project or open as a new browser project.</div>
+        </div>
+        <label class="load-import-label" for="load-import-text">Paste JSON</label>
+        <textarea class="load-import-text" id="load-import-text" spellcheck="false" placeholder='{"title":"ArcFlow project","nodes":[...],"edges":[...]}'></textarea>
+        <div class="load-import-status is-idle" id="load-import-status">
+          <span class="load-import-status-dot" aria-hidden="true"></span>
+          <span class="load-import-status-text" id="load-import-status-text">Paste ArcFlow JSON to validate it before importing.</span>
+        </div>
+        <div class="load-import-actions">
+          <button class="load-btn" id="load-import-replace" type="button" disabled>Replace current</button>
+          <button class="load-btn load-btn-primary" id="load-import-new-project" type="button" disabled>Create new project</button>
+        </div>
+      </div>
+    </div>
     <div class="load-list-wrap">
       <div class="load-list-head">
-        <div class="load-list-title">Recent browser projects</div>
-        <div class="load-list-meta" id="load-count">0 projects</div>
+        <div class="load-list-head-main">
+          <div class="load-list-title">Recent browser projects</div>
+          <div class="load-list-meta" id="load-count">0 projects</div>
+        </div>
+        <div class="load-list-actions">
+          <button class="load-btn" id="load-delete-selected" type="button" disabled>Delete selected</button>
+          <button class="load-btn" id="load-clear-all" type="button" disabled>Clear all</button>
+        </div>
       </div>
       <div id="load-list"></div>
     </div>
   </div>
 </div>
 
+<div id="drop-modal" aria-hidden="true">
+  <div class="drop-box" role="dialog" aria-modal="true" aria-labelledby="drop-title" aria-describedby="drop-copy">
+    <button class="drop-close" id="drop-close" type="button" aria-label="Close drag and drop import dialog">✕</button>
+    <div id="drop-body"></div>
+  </div>
+</div>
 
 <div id="exp-modal" aria-hidden="true">
   <div class="exp-box" role="dialog" aria-modal="true" aria-labelledby="exp-title" aria-describedby="exp-subtitle">
@@ -298,6 +332,7 @@
   </div>
 </div>
 
+<script src="assets/js/example-project.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>

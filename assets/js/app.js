@@ -131,12 +131,15 @@ function syncPhoneGuard(){
       : '';
   }
   if(!blocked)return;
+  if(typeof closeDropModal==='function')closeDropModal();
   document.getElementById('load-modal')?.classList.remove('open');
   document.getElementById('exp-modal')?.classList.remove('open');
+  document.getElementById('drop-modal')?.classList.remove('open');
   document.getElementById('ui-modal')?.classList.remove('open');
   document.getElementById('share-modal')?.classList.remove('open');
   document.getElementById('load-modal')?.setAttribute('aria-hidden','true');
   document.getElementById('exp-modal')?.setAttribute('aria-hidden','true');
+  document.getElementById('drop-modal')?.setAttribute('aria-hidden','true');
   document.getElementById('ui-modal')?.setAttribute('aria-hidden','true');
   document.getElementById('share-modal')?.setAttribute('aria-hidden','true');
   document.activeElement?.blur?.();
@@ -415,6 +418,19 @@ function blankProjectState(title=DEFAULT_PROJECT_TITLE){
     nid:1
   };
 }
+function getBuiltInExampleState(){
+  const raw=window.ARCFLOW_DEFAULT_EXAMPLE;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)){
+    throw new Error('The built-in example data is unavailable.');
+  }
+  const clean=sanitizeLoad(raw);
+  return{
+    title:clean.title||'ArcFlow example',
+    nodes:clean.nodes,
+    edges:clean.edges,
+    nid:clean.nid
+  };
+}
 function resetHistory(){
   S.hist=[];
   S.hidx=-1;
@@ -545,6 +561,27 @@ function activeProjectCountText(count){
 function activeProjectMeta(project){
   return`${project.nodes.length} nodes · ${project.edges.length} edges`;
 }
+const loadSelectedProjectIds=new Set();
+function pruneLoadSelection(projects){
+  const valid=new Set((projects||[]).map(project=>project.id));
+  [...loadSelectedProjectIds].forEach(id=>{
+    if(!valid.has(id))loadSelectedProjectIds.delete(id);
+  });
+}
+function loadCountText(projects){
+  const count=projects.length;
+  const selected=loadSelectedProjectIds.size;
+  if(!selected)return activeProjectCountText(count);
+  return `${activeProjectCountText(count)} • ${selected} selected`;
+}
+function syncLoadBulkActions(projects){
+  const anyProjects=(projects?.length||0)>0;
+  const hasSelection=loadSelectedProjectIds.size>0;
+  const deleteBtn=document.getElementById('load-delete-selected');
+  const clearBtn=document.getElementById('load-clear-all');
+  deleteBtn?.toggleAttribute('disabled',S.readOnly||!hasSelection);
+  clearBtn?.toggleAttribute('disabled',S.readOnly||!anyProjects);
+}
 async function confirmCanvasReplacement(title='Replace current project',message='Replace the current canvas with another project? Unsaved in-memory edits newer than the last browser autosave will be lost.'){
   if(!hasUnsavedChanges())return true;
   return uiConfirm(message,title,'Replace','Cancel');
@@ -554,7 +591,9 @@ function renderLoadProjects(){
   const list=document.getElementById('load-list');
   const count=document.getElementById('load-count');
   if(!list||!count)return;
-  count.textContent=activeProjectCountText(store.projects.length);
+  pruneLoadSelection(store.projects);
+  count.textContent=loadCountText(store.projects);
+  syncLoadBulkActions(store.projects);
   if(!store.projects.length){
     list.innerHTML=`<div class="load-empty">
       <div class="load-empty-title">No browser projects yet</div>
@@ -563,7 +602,11 @@ function renderLoadProjects(){
     return;
   }
   list.innerHTML=store.projects.map(project=>`
-    <article class="load-item${project.id===S.activeProjectId?' is-active':''}" data-load-id="${escAttr(project.id)}">
+    <article class="load-item${project.id===S.activeProjectId?' is-active':''}${loadSelectedProjectIds.has(project.id)?' is-marked':''}" data-load-id="${escAttr(project.id)}">
+      <label class="load-item-check">
+        <input class="load-item-checkbox" type="checkbox" data-load-select="${escAttr(project.id)}"${loadSelectedProjectIds.has(project.id)?' checked':''}${S.readOnly?' disabled':''}>
+        <span class="load-item-checkbox-ui" aria-hidden="true"></span>
+      </label>
       <div class="load-item-main">
         <div class="load-item-top">
           <strong class="load-item-title">${esc(normalizeProjectTitle(project.title,DEFAULT_PROJECT_TITLE))}</strong>
@@ -578,6 +621,18 @@ function renderLoadProjects(){
       </div>
     </article>
   `).join('');
+  list.querySelectorAll('[data-load-select]').forEach(input=>input.addEventListener('change',()=>{
+    if(input.checked)loadSelectedProjectIds.add(input.dataset.loadSelect);
+    else loadSelectedProjectIds.delete(input.dataset.loadSelect);
+    renderLoadProjects();
+  }));
+  list.querySelectorAll('.load-item').forEach(item=>item.addEventListener('click',e=>{
+    if(e.target.closest('button,.load-item-check'))return;
+    const checkbox=item.querySelector('[data-load-select]');
+    if(!checkbox||checkbox.disabled)return;
+    checkbox.checked=!checkbox.checked;
+    checkbox.dispatchEvent(new Event('change',{bubbles:true}));
+  }));
   list.querySelectorAll('[data-load-open]').forEach(btn=>btn.addEventListener('click',async()=>{
     const storeNow=readBrowserStore();
     const project=storeNow.projects.find(p=>p.id===btn.dataset.loadOpen);
@@ -623,19 +678,465 @@ function renderLoadProjects(){
     showToast('Browser project deleted.','info');
   }));
 }
+async function deleteBrowserProjectsByIds(projectIds,{
+  confirmTitle='Delete projects',
+  confirmMessage='Delete the selected browser projects?'
+}={}){
+  if(blockIfReadOnly('delete browser projects'))return false;
+  const uniqueIds=[...new Set(projectIds)].filter(Boolean);
+  if(!uniqueIds.length)return false;
+  const storeNow=readBrowserStore();
+  const existing=storeNow.projects.filter(project=>uniqueIds.includes(project.id));
+  if(!existing.length)return false;
+  const includesActive=existing.some(project=>project.id===S.activeProjectId);
+  const activeProject=existing.find(project=>project.id===S.activeProjectId)||null;
+  const message=includesActive&&hasUnsavedChanges()
+    ? 'Delete the selected browser projects? Unsaved in-memory edits newer than the last autosave will also be discarded for the current project.'
+    : confirmMessage;
+  const ok=await uiConfirm(message,confirmTitle,'Delete','Cancel');
+  if(!ok)return false;
+  const nextStore=readBrowserStore();
+  nextStore.projects=nextStore.projects.filter(project=>!uniqueIds.includes(project.id));
+  uniqueIds.forEach(id=>loadSelectedProjectIds.delete(id));
+  if(includesActive){
+    const replacement=nextStore.projects[0]||null;
+    nextStore.activeProjectId=replacement?.id||null;
+    writeBrowserStore(nextStore);
+    if(replacement){
+      applyProjectState(replacement,{projectId:replacement.id,fit:true,markClean:true});
+    }else{
+      applyProjectState(blankProjectState(),{projectId:null,fit:true,markClean:true});
+    }
+  }else{
+    writeBrowserStore(nextStore);
+  }
+  renderLoadProjects();
+  if(existing.length===1&&activeProject){
+    showToast('Browser project deleted.','info');
+  }else if(existing.length===1){
+    showToast('Browser project deleted.','info');
+  }else{
+    showToast(`${existing.length} browser projects deleted.`,'info');
+  }
+  return true;
+}
 const loadModal=document.getElementById('load-modal');
+const loadImportWrap=document.getElementById('load-import-wrap');
+const loadImportBtn=document.getElementById('load-import');
+const loadImportFileBtn=document.getElementById('load-import-file');
+const loadImportText=document.getElementById('load-import-text');
+const loadImportStatus=document.getElementById('load-import-status');
+const loadImportStatusText=document.getElementById('load-import-status-text');
+const loadImportReplaceBtn=document.getElementById('load-import-replace');
+const loadImportNewProjectBtn=document.getElementById('load-import-new-project');
+const loadDeleteSelectedBtn=document.getElementById('load-delete-selected');
+const loadClearAllBtn=document.getElementById('load-clear-all');
+const dropModal=document.getElementById('drop-modal');
+const dropBody=document.getElementById('drop-body');
+const dropCloseBtn=document.getElementById('drop-close');
+const LOAD_IMPORT_IDLE_TEXT='Paste ArcFlow JSON to validate it before importing.';
+const loadImportState={
+  open:false,
+  text:'',
+  status:'idle',
+  message:LOAD_IMPORT_IDLE_TEXT,
+  parsed:null
+};
+const dropState={
+  active:false,
+  dragDepth:0,
+  status:'hidden',
+  files:[],
+  selectedFile:null,
+  parsed:null,
+  error:'',
+  errorTitle:'Import failed',
+  parseToken:0
+};
+function isJsonImportFile(file){
+  const name=String(file?.name||'').toLowerCase();
+  const type=String(file?.type||'').toLowerCase();
+  return name.endsWith('.json')||type==='application/json'||type==='text/json';
+}
+function formatFileSize(size){
+  const bytes=Math.max(0,Number(size)||0);
+  if(bytes<1024)return`${bytes} B`;
+  if(bytes<1024*1024)return`${(bytes/1024).toFixed(bytes<10*1024?1:0)} KB`;
+  return`${(bytes/(1024*1024)).toFixed(bytes<10*1024*1024?1:0)} MB`;
+}
+function readFileText(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=ev=>resolve(String(ev.target.result||''));
+    r.onerror=()=>reject(new Error('Read failed'));
+    r.readAsText(file);
+  }).catch(()=>null);
+}
+function buildImportedProjectState(result,titleFallback=DEFAULT_PROJECT_TITLE){
+  return{
+    title:normalizeProjectTitle(result.title,titleFallback),
+    nodes:result.nodes,
+    edges:result.edges,
+    nid:result.nid
+  };
+}
+function parseImportedProjectText(text,titleFallback=DEFAULT_PROJECT_TITLE){
+  let raw;
+  try{raw=JSON.parse(text);}
+  catch{return{error:'The pasted text is not valid JSON.'};}
+  let result;
+  try{result=sanitizeLoad(raw);}
+  catch(err){return{error:err?.message||'The pasted text is not a valid ArcFlow file.'};}
+  return{
+    nextState:buildImportedProjectState(result,titleFallback),
+    warnings:result.warnings||[]
+  };
+}
+async function parseImportedProjectFile(file){
+  if(!isJsonImportFile(file)){
+    return{
+      error:'Only .json files exported from ArcFlow can be loaded.',
+      errorTitle:'Unsupported file'
+    };
+  }
+  const text=await readFileText(file);
+  if(text===null){
+    return{
+      error:'The selected file could not be read.',
+      errorTitle:'Load failed'
+    };
+  }
+  const parsed=parseImportedProjectText(text,normalizeProjectTitle(file.name.replace(/\.[^.]+$/,''),DEFAULT_PROJECT_TITLE));
+  if(parsed.error){
+    return{
+      error:parsed.error,
+      errorTitle:parsed.error.includes('valid JSON')?'Load failed':'Incompatible file'
+    };
+  }
+  return{
+    file,
+    nextState:parsed.nextState,
+    warnings:parsed.warnings||[]
+  };
+}
+function syncLoadImportUi(){
+  loadImportWrap?.classList.toggle('is-open',loadImportState.open);
+  loadImportBtn?.classList.toggle('is-active',loadImportState.open);
+  loadImportBtn?.setAttribute('aria-expanded',loadImportState.open?'true':'false');
+  if(loadImportWrap)loadImportWrap.scrollTop=0;
+  if(loadImportText&&loadImportText.value!==loadImportState.text)loadImportText.value=loadImportState.text;
+  if(loadImportStatus){
+    loadImportStatus.classList.toggle('is-idle',loadImportState.status==='idle');
+    loadImportStatus.classList.toggle('is-valid',loadImportState.status==='valid');
+    loadImportStatus.classList.toggle('is-invalid',loadImportState.status==='invalid');
+  }
+  if(loadImportStatusText)loadImportStatusText.textContent=loadImportState.message;
+  const enableActions=loadImportState.status==='valid'&&!!loadImportState.parsed;
+  loadImportReplaceBtn?.toggleAttribute('disabled',!enableActions);
+  loadImportNewProjectBtn?.toggleAttribute('disabled',!enableActions);
+}
+function resetLoadImportState({preserveOpen=false}={}){
+  loadImportState.open=preserveOpen?loadImportState.open:false;
+  loadImportState.text='';
+  loadImportState.status='idle';
+  loadImportState.message=LOAD_IMPORT_IDLE_TEXT;
+  loadImportState.parsed=null;
+  if(loadImportWrap)loadImportWrap.scrollTop=0;
+  if(loadImportText){
+    loadImportText.value='';
+    loadImportText.scrollTop=0;
+    loadImportText.scrollLeft=0;
+  }
+  syncLoadImportUi();
+}
+function setLoadImportOpen(next,{focus=false}={}){
+  loadImportState.open=!!next;
+  syncLoadImportUi();
+  if(loadImportState.open&&focus){
+    requestAnimationFrame(()=>loadImportText?.focus());
+  }
+}
+function validateLoadImportText(){
+  const text=(loadImportText?.value||'').trim();
+  loadImportState.text=loadImportText?.value||'';
+  if(!text){
+    loadImportState.status='idle';
+    loadImportState.message=LOAD_IMPORT_IDLE_TEXT;
+    loadImportState.parsed=null;
+    syncLoadImportUi();
+    return;
+  }
+  const parsed=parseImportedProjectText(text);
+  if(parsed.error){
+    loadImportState.status='invalid';
+    loadImportState.message=parsed.error;
+    loadImportState.parsed=null;
+    syncLoadImportUi();
+    return;
+  }
+  const nextState=parsed.nextState;
+  loadImportState.status='valid';
+  loadImportState.message=`${normalizeProjectTitle(nextState.title,DEFAULT_PROJECT_TITLE)} · ${nextState.nodes.length} nodes · ${nextState.edges.length} edges`;
+  loadImportState.parsed=parsed;
+  syncLoadImportUi();
+}
+async function finalizeImportedProject(nextState,{
+  projectId=S.activeProjectId,
+  warnings=[],
+  confirmTitle='Import JSON',
+  confirmMessage='Import this JSON and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.',
+  successMessage='Project imported into browser storage.',
+  closeOtherDialogs=false,
+  closeLoadOnSuccess=true
+}={}){
+  const ok=await confirmCanvasReplacement(confirmTitle,confirmMessage);
+  if(!ok)return false;
+  if(closeOtherDialogs){
+    closeUiModalIfOpen();
+    if(document.getElementById('exp-modal')?.classList.contains('open'))closeExportModal();
+    if(document.getElementById('share-modal')?.classList.contains('open'))_closeShareModal();
+  }
+  applyProjectState(nextState,{projectId:projectId||generateProjectId(),fit:true,markClean:false});
+  persistActiveProjectNow({createIfMissing:true});
+  if(closeLoadOnSuccess)closeLoadModal();
+  showToast(successMessage,'success');
+  if(warnings.length){
+    uiAlert(
+      'Project imported with the following corrections:\n\n' + warnings.map(w=>'  - ' + w).join('\n'),
+      'Imported with warnings'
+    );
+  }
+  return true;
+}
 function closeLoadModal(){
   loadModal?.classList.remove('open');
   loadModal?.setAttribute('aria-hidden','true');
+  loadSelectedProjectIds.clear();
+  resetLoadImportState();
+}
+function closeUiModalIfOpen(){
+  const modal=document.getElementById('ui-modal');
+  if(!modal?.classList.contains('open'))return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden','true');
+}
+function resetDropState(){
+  dropState.active=false;
+  dropState.dragDepth=0;
+  dropState.status='hidden';
+  dropState.files=[];
+  dropState.selectedFile=null;
+  dropState.parsed=null;
+  dropState.error='';
+  dropState.errorTitle='Import failed';
+}
+function closeDropModal(){
+  dropState.parseToken++;
+  resetDropState();
+  syncDropModal();
+}
+function buildDropFileList(){
+  return dropState.files.map((file,index)=>`
+    <button class="drop-file${dropState.selectedFile===file?' is-active':''}" type="button" data-drop-file-index="${index}">
+      <span class="drop-file-main">
+        <span class="drop-file-name">${esc(file.name)}</span>
+        <span class="drop-file-meta">${esc(formatFileSize(file.size))}</span>
+      </span>
+      <span class="drop-file-open">Select</span>
+    </button>
+  `).join('');
+}
+function syncDropModal(){
+  const open=dropState.active&&dropState.status!=='hidden';
+  dropModal?.classList.toggle('open',open);
+  dropModal?.setAttribute('aria-hidden',open?'false':'true');
+  if(dropCloseBtn)dropCloseBtn.hidden=!open||dropState.status==='dragging';
+  if(!dropBody)return;
+  if(!open){
+    dropBody.innerHTML='';
+    return;
+  }
+  const selectedFile=dropState.selectedFile;
+  const parsed=dropState.parsed;
+  let html='';
+  if(dropState.status==='dragging'){
+    html=`
+      <div class="drop-stage">
+        <div class="drop-kicker">Import</div>
+        <div class="drop-zone">
+          <div class="drop-zone-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M10 3v8"></path>
+              <path d="M6.5 7.5 10 11l3.5-3.5"></path>
+              <path d="M4 14.5h12"></path>
+            </svg>
+          </div>
+          <div class="drop-zone-title" id="drop-title">Drop ArcFlow JSON</div>
+          <div class="drop-zone-copy" id="drop-copy">Drop a <code>.json</code> export anywhere in ArcFlow to validate it before importing. You can replace the current project or create a new browser project after validation.</div>
+          <div class="drop-chip-row">
+            <div class="drop-chip">Replace current</div>
+            <div class="drop-chip">Create new project</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }else if(dropState.status==='choosing'){
+    html=`
+      <div class="drop-stage">
+        <div class="drop-kicker">Multiple files</div>
+        <div class="drop-title" id="drop-title">Choose a JSON file to import</div>
+        <div class="drop-copy" id="drop-copy">ArcFlow only imports one dropped project at a time. Pick the file you want to validate first.</div>
+        <div class="drop-panel">
+          <div class="drop-panel-head">
+            <div class="drop-panel-title">Dropped JSON files</div>
+            <div class="drop-panel-copy">Only files with a <code>.json</code> extension are shown here.</div>
+          </div>
+          <div class="drop-file-list">${buildDropFileList()}</div>
+        </div>
+        <div class="drop-actions">
+          <button class="load-btn" type="button" data-drop-cancel>Cancel</button>
+        </div>
+      </div>
+    `;
+  }else if(dropState.status==='parsing'){
+    html=`
+      <div class="drop-stage">
+        <div class="drop-kicker">Validating</div>
+        <div class="drop-title" id="drop-title">Checking ${esc(selectedFile?.name||'dropped file')}</div>
+        <div class="drop-copy" id="drop-copy">ArcFlow is reading the dropped file and validating it against the project schema.</div>
+        <div class="drop-status">
+          <span class="drop-spinner" aria-hidden="true"></span>
+          <div class="drop-status-text">Parsing ${esc(selectedFile?.name||'file')}…</div>
+        </div>
+        <div class="drop-actions">
+          <button class="load-btn" type="button" data-drop-cancel>Cancel</button>
+        </div>
+      </div>
+    `;
+  }else if(dropState.status==='valid'&&parsed){
+    html=`
+      <div class="drop-stage">
+        <div class="drop-kicker">Ready to import</div>
+        <div class="drop-title" id="drop-title">${esc(normalizeProjectTitle(parsed.nextState.title,DEFAULT_PROJECT_TITLE))}</div>
+        <div class="drop-copy" id="drop-copy">The dropped file is valid ArcFlow JSON. Choose whether to replace the current project or open it as a new browser project.</div>
+        <div class="drop-summary">
+          <div class="drop-summary-label">File</div>
+          <div class="drop-summary-value is-file">${esc(parsed.file.name)}</div>
+          <div class="drop-summary-label">Contents</div>
+          <div class="drop-summary-value">${esc(`${parsed.nextState.nodes.length} nodes · ${parsed.nextState.edges.length} edges`)}</div>
+          <div class="drop-summary-label">Size</div>
+          <div class="drop-summary-value">${esc(formatFileSize(parsed.file.size))}</div>
+        </div>
+        ${dropState.files.length>1?`<div class="drop-chooser-note">Need a different file from this drop? Pick another one before importing.</div><div class="drop-file-list">${buildDropFileList()}</div>`:''}
+        <div class="drop-actions">
+          <button class="load-btn" type="button" data-drop-cancel>Cancel</button>
+          <button class="load-btn" type="button" data-drop-replace>Replace current</button>
+          <button class="load-btn load-btn-primary" type="button" data-drop-new>Create new project</button>
+        </div>
+      </div>
+    `;
+  }else if(dropState.status==='invalid'){
+    html=`
+      <div class="drop-stage">
+        <div class="drop-kicker">Import failed</div>
+        <div class="drop-title" id="drop-title">${esc(dropState.errorTitle||'Could not import file')}</div>
+        <div class="drop-copy" id="drop-copy">${esc(dropState.error||'The dropped file could not be imported into ArcFlow.')}</div>
+        <div class="drop-status is-error">
+          <span class="drop-status-dot" aria-hidden="true"></span>
+          <div class="drop-status-text">${esc(dropState.error||'The dropped file could not be imported into ArcFlow.')}</div>
+        </div>
+        ${dropState.files.length>1?`
+          <div class="drop-panel">
+            <div class="drop-panel-head">
+              <div class="drop-panel-title">Choose another dropped file</div>
+              <div class="drop-panel-copy">Pick a different JSON file from the same drop to validate next.</div>
+            </div>
+            <div class="drop-file-list">${buildDropFileList()}</div>
+          </div>
+        `:''}
+        <div class="drop-actions">
+          <button class="load-btn" type="button" data-drop-cancel>Dismiss</button>
+          <button class="load-btn load-btn-primary" type="button" data-drop-open-load>Open Load modal</button>
+        </div>
+      </div>
+    `;
+  }
+  dropBody.innerHTML=html;
+  dropBody.querySelectorAll('[data-drop-file-index]').forEach(btn=>btn.addEventListener('click',()=>{
+    const file=dropState.files[Number(btn.dataset.dropFileIndex)];
+    if(!file)return;
+    beginDroppedFileParse(file);
+  }));
+  dropBody.querySelector('[data-drop-cancel]')?.addEventListener('click',closeDropModal);
+  dropBody.querySelector('[data-drop-open-load]')?.addEventListener('click',openLoadModalFromDrop);
+  dropBody.querySelector('[data-drop-replace]')?.addEventListener('click',()=>importDroppedProject({replaceCurrent:true}));
+  dropBody.querySelector('[data-drop-new]')?.addEventListener('click',()=>importDroppedProject({replaceCurrent:false}));
+}
+async function beginDroppedFileParse(file){
+  dropState.active=true;
+  dropState.status='parsing';
+  dropState.selectedFile=file;
+  dropState.parsed=null;
+  dropState.error='';
+  dropState.errorTitle='Import failed';
+  const token=++dropState.parseToken;
+  syncDropModal();
+  const prepared=await parseImportedProjectFile(file);
+  if(token!==dropState.parseToken)return;
+  dropState.selectedFile=file;
+  if(prepared.error){
+    dropState.status='invalid';
+    dropState.parsed=null;
+    dropState.error=prepared.error;
+    dropState.errorTitle=prepared.errorTitle||'Import failed';
+    syncDropModal();
+    return;
+  }
+  dropState.status='valid';
+  dropState.parsed=prepared;
+  dropState.error='';
+  dropState.errorTitle='Import failed';
+  syncDropModal();
+}
+function openLoadModalFromDrop(){
+  const loadWasOpen=loadModal?.classList.contains('open');
+  if(document.getElementById('exp-modal')?.classList.contains('open'))closeExportModal();
+  if(document.getElementById('share-modal')?.classList.contains('open'))_closeShareModal();
+  closeUiModalIfOpen();
+  closeDropModal();
+  if(!loadWasOpen)openLoadModal();
+  renderLoadProjects();
+  setLoadImportOpen(true,{focus:true});
+}
+async function importDroppedProject({replaceCurrent=true}={}){
+  if(!dropState.parsed)return;
+  dropModal?.classList.remove('open');
+  dropModal?.setAttribute('aria-hidden','true');
+  const ok=await finalizeImportedProject(dropState.parsed.nextState,{
+    projectId:replaceCurrent?S.activeProjectId:generateProjectId(),
+    warnings:dropState.parsed.warnings,
+    confirmTitle:replaceCurrent?'Import dropped JSON':'Import into new project',
+    confirmMessage:replaceCurrent
+      ? 'Import this dropped JSON file and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.'
+      : 'Import this dropped JSON file into a new browser project and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.',
+    successMessage:replaceCurrent?'Dropped JSON imported into browser storage.':'Dropped JSON imported into a new browser project.',
+    closeOtherDialogs:true
+  });
+  if(ok){
+    closeDropModal();
+    return;
+  }
+  syncDropModal();
 }
 function isAppDialogOpen(){
-  return ['ui-modal','load-modal','exp-modal','share-modal'].some(id=>{
+  return ['ui-modal','load-modal','exp-modal','share-modal','drop-modal'].some(id=>{
     const el=document.getElementById(id);
     return !!el&&el.classList.contains('open');
   });
 }
 function openLoadModal(){
   if(isAppDialogOpen())return;
+  syncLoadImportUi();
   renderLoadProjects();
   loadModal?.classList.add('open');
   loadModal?.setAttribute('aria-hidden','false');
@@ -1001,16 +1502,20 @@ function autoRoutePoints(fp,tp,fpSide,tpSide){
   const pts=[fp,fs];
   if(fd.axis===td.axis){
     if(fd.axis==='v'){
-      const my=Math.round((fs.y+ts.y)/2);
+      const my=fpSide===tpSide
+        ? (fpSide==='top'?Math.min(fs.y,ts.y):Math.max(fs.y,ts.y))
+        : Math.round((fs.y+ts.y)/2);
       pts.push({x:fs.x,y:my},{x:ts.x,y:my});
     }else{
-      const mx=Math.round((fs.x+ts.x)/2);
+      const mx=fpSide===tpSide
+        ? (fpSide==='left'?Math.min(fs.x,ts.x):Math.max(fs.x,ts.x))
+        : Math.round((fs.x+ts.x)/2);
       pts.push({x:mx,y:fs.y},{x:mx,y:ts.y});
     }
   }else if(fd.axis==='v'&&td.axis==='h'){
-    pts.push({x:fs.x,y:ts.y});
-  }else{
     pts.push({x:ts.x,y:fs.y});
+  }else{
+    pts.push({x:fs.x,y:ts.y});
   }
   pts.push(ts,tp);
   return compactPolyline(pts);
@@ -1031,16 +1536,42 @@ function defaultLabelAnchor(points){
   const segment=Math.floor((points.length-1)/2);
   return{segment,t:0.5};
 }
-function edgeLabelBasePoint(edge,points){
+function resolveEdgeLabelAnchor(edge,points){
   if(!points||points.length<2)return null;
   const fallback=defaultLabelAnchor(points);
   const anchor=normalizeLabelAnchor(edge.labelAnchor);
-  const resolved=anchor&&anchor.segment<points.length-1?anchor:fallback;
+  return anchor&&anchor.segment<points.length-1?anchor:fallback;
+}
+function edgeLabelBasePoint(edge,points){
+  const resolved=resolveEdgeLabelAnchor(edge,points);
   if(!resolved)return null;
   const a=points[resolved.segment];
   const b=points[resolved.segment+1];
   if(!a||!b)return null;
   return pointAlongSegment(a,b,resolved.t);
+}
+function edgeLabelLayout(edge,points){
+  if(!edge.label||!points||points.length<2)return null;
+  const resolved=resolveEdgeLabelAnchor(edge,points);
+  if(!resolved)return null;
+  const a=points[resolved.segment];
+  const b=points[resolved.segment+1];
+  if(!a||!b)return null;
+  const offset=normalizeLabelOffset(edge.labelOffset)||{dx:0,dy:0};
+  const base=pointAlongSegment(a,b,resolved.t);
+  const point={x:base.x+offset.dx,y:base.y+offset.dy};
+  const width=Math.max(edge.label.length*7.2+20,38);
+  const hitHeight=20;
+  const bgHeight=16;
+  const vertical=Math.abs(b.y-a.y)>Math.abs(b.x-a.x);
+  return{
+    point,
+    width,
+    hitHeight,
+    bgHeight,
+    vertical,
+    angle:vertical?-90:0
+  };
 }
 function projectPointToSegment(a,b,p){
   const dx=b.x-a.x,dy=b.y-a.y;
@@ -1062,10 +1593,7 @@ function projectPointToRoute(points,p){
   return best;
 }
 function edgeLabelPoint(edge,points){
-  const base=edgeLabelBasePoint(edge,points);
-  if(!base)return null;
-  const offset=normalizeLabelOffset(edge.labelOffset)||{dx:0,dy:0};
-  return{x:base.x+offset.dx,y:base.y+offset.dy};
+  return edgeLabelLayout(edge,points)?.point||null;
 }
 function pointInRect(point,rect){
   return point.x>=rect.left&&point.x<=rect.right&&point.y>=rect.top&&point.y<=rect.bottom;
@@ -1102,15 +1630,22 @@ function segmentIntersectsRect(a,b,rect){
   return false;
 }
 function edgeLabelRect(edge,points){
-  if(!edge.label)return null;
-  const labelPoint=edgeLabelPoint(edge,points);
-  if(!labelPoint)return null;
-  const width=Math.max(edge.label.length*7.2+20,38);
+  const layout=edgeLabelLayout(edge,points);
+  if(!layout)return null;
+  const {point:labelPoint,width,hitHeight,vertical}=layout;
+  if(vertical){
+    return{
+      left:labelPoint.x-hitHeight/2,
+      top:labelPoint.y-width/2,
+      right:labelPoint.x+hitHeight/2,
+      bottom:labelPoint.y+width/2,
+    };
+  }
   return{
     left:labelPoint.x-width/2,
-    top:labelPoint.y-10,
+    top:labelPoint.y-hitHeight/2,
     right:labelPoint.x+width/2,
-    bottom:labelPoint.y+10,
+    bottom:labelPoint.y+hitHeight/2,
   };
 }
 function edgeIntersectsSelectionRect(edge,rect){
@@ -1187,19 +1722,28 @@ function drawContainers(){
     const visuals=resolveNodeVisuals(n);
     const lsz=10, lthk=2.5;
     const lpath=`M${rx-lsz} ${ry-lthk/2}L${rx-lthk/2} ${ry-lthk/2}L${rx-lthk/2} ${ry-lsz}`;
-    const handles=(n.locked||S.readOnly)?'':[
-      {corner:'tl',x:n.x-9,y:n.y-9},
-      {corner:'t',x:n.x+n.w/2-9,y:n.y-9},
-      {corner:'tr',x:rx-9,y:n.y-9},
-      {corner:'l',x:n.x-9,y:n.y+n.h/2-9},
-      {corner:'r',x:rx-9,y:n.y+n.h/2-9},
-      {corner:'bl',x:n.x-9,y:ry-9},
-      {corner:'b',x:n.x+n.w/2-9,y:ry-9},
-      {corner:'br',x:rx-9,y:ry-9},
-    ].map(handle=>`<rect class="rz-h rz-h-${handle.corner}" x="${handle.x}" y="${handle.y}" width="18" height="18" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" data-rzcorner="${handle.corner}" pointer-events="all"/>`).join('');
+    const edgeIndicatorW=clamp(Math.round(n.w*.5),56,Math.max(56,n.w-28));
+    const edgeIndicatorH=clamp(Math.round(n.h*.5),56,Math.max(56,n.h-28));
+    const edgeGripW=Math.min(n.w+22,edgeIndicatorW+30);
+    const edgeGripH=Math.min(n.h+22,edgeIndicatorH+30);
+    const visibleCornerSize=9;
+    const visibleSideThickness=5;
+    const handleDefs=[
+      {corner:'tl',x:n.x-11,y:n.y-11,w:22,h:22,vx:n.x-7,vy:n.y-7,vw:visibleCornerSize,vh:visibleCornerSize},
+      {corner:'t',x:n.x+n.w/2-edgeGripW/2,y:n.y-11,w:edgeGripW,h:22,vx:n.x+n.w/2-edgeIndicatorW/2,vy:n.y-6,vw:edgeIndicatorW,vh:visibleSideThickness},
+      {corner:'tr',x:rx-11,y:n.y-11,w:22,h:22,vx:rx-2,vy:n.y-7,vw:visibleCornerSize,vh:visibleCornerSize},
+      {corner:'l',x:n.x-11,y:n.y+n.h/2-edgeGripH/2,w:22,h:edgeGripH,vx:n.x-6,vy:n.y+n.h/2-edgeIndicatorH/2,vw:visibleSideThickness,vh:edgeIndicatorH},
+      {corner:'r',x:rx-11,y:n.y+n.h/2-edgeGripH/2,w:22,h:edgeGripH,vx:rx+1,vy:n.y+n.h/2-edgeIndicatorH/2,vw:visibleSideThickness,vh:edgeIndicatorH},
+      {corner:'bl',x:n.x-11,y:ry-11,w:22,h:22,vx:n.x-7,vy:ry-2,vw:visibleCornerSize,vh:visibleCornerSize},
+      {corner:'b',x:n.x+n.w/2-edgeGripW/2,y:ry-11,w:edgeGripW,h:22,vx:n.x+n.w/2-edgeIndicatorW/2,vy:ry+1,vw:edgeIndicatorW,vh:visibleSideThickness},
+      {corner:'br',x:rx-11,y:ry-11,w:22,h:22,vx:rx-2,vy:ry-2,vw:visibleCornerSize,vh:visibleCornerSize},
+    ];
+    const handles=(n.locked||S.readOnly)?'':handleDefs.map(handle=>`<rect class="rz-h rz-h-${handle.corner}" x="${handle.x}" y="${handle.y}" width="${handle.w}" height="${handle.h}" rx="${TEXT_NODE_RX}" data-rzid="${escAttr(n.id)}" data-rzcorner="${handle.corner}" pointer-events="all"/>`).join('');
+    const visibleHandles=(sel&&!n.locked&&!S.readOnly)?handleDefs.map(handle=>`<rect class="rz-v ${handle.corner.length===1?'rz-v-side':'rz-v-corner'} rz-v-${handle.corner}" x="${handle.vx}" y="${handle.vy}" width="${handle.vw}" height="${handle.vh}" rx="${handle.corner.length===1?2:1.5}" pointer-events="none"/>`).join(''):'';
     h+=`<g class="cont-g${sel?' sel':''}${n.locked?' locked':''}" data-nid="${escAttr(n.id)}" data-cont="1">
 <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${SECTION_RX}" fill="${visuals.fill}" stroke="${visuals.stroke}" stroke-width="${sel?2:1}" stroke-dasharray="7 4"/>
 <text class="nt" x="${n.x+14}" y="${n.y+17}" font-size="12" font-weight="500" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.title}">${esc(n.title)}</text>
+${visibleHandles}
 ${handles}
 <path d="${lpath}" fill="none" stroke="${mixHex(visuals.stroke,themeColors().bg2,0.35)}" stroke-width="${lthk}" stroke-linecap="round" pointer-events="none" opacity=".82"/>
 ${n.locked?renderLockBadge(n.x+n.w-26,n.y+10,visuals.stroke):''}
@@ -1221,13 +1765,15 @@ function drawEdges(){
     h+=`<path class="ep${e.dash?' dash':''}${sel?' sel':''}" d="${d}" marker-end="url(#arr)" data-eid="${escAttr(e.id)}" stroke="${visuals.stroke}" stroke-width="${sel?3:1.5}"/>`;
 
     if(e.label){
-      const labelPoint=edgeLabelPoint(e,pts);
-      if(!labelPoint)return;
-      const mx=labelPoint.x,my=labelPoint.y;
-      const tw=Math.max(e.label.length*7.2+20,38);
-      h+=`<rect class="elabel-hit${sel?' sel':''}" x="${mx-tw/2}" y="${my-10}" width="${tw}" height="20" rx="10" data-elblid="${escAttr(e.id)}" pointer-events="all"/>`;
-      h+=`<rect class="elabel-bg" x="${mx-tw/2}" y="${my-8}" width="${tw}" height="16" rx="8" fill="${visuals.labelBg}"/>`;
+      const layout=edgeLabelLayout(e,pts);
+      if(!layout)return;
+      const mx=layout.point.x,my=layout.point.y;
+      const transform=layout.vertical?` transform="rotate(${layout.angle} ${mx} ${my})"`:'';
+      h+=`<g${transform}>`;
+      h+=`<rect class="elabel-hit${sel?' sel':''}" x="${mx-layout.width/2}" y="${my-layout.hitHeight/2}" width="${layout.width}" height="${layout.hitHeight}" rx="10" data-elblid="${escAttr(e.id)}" pointer-events="all"/>`;
+      h+=`<rect class="elabel-bg" x="${mx-layout.width/2}" y="${my-layout.bgHeight/2}" width="${layout.width}" height="${layout.bgHeight}" rx="8" fill="${visuals.labelBg}"/>`;
       h+=`<text class="elabel" x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="central" fill="${visuals.labelText}">${esc(e.label)}</text>`;
+      h+=`</g>`;
     }
   });
   document.getElementById('lay-e').innerHTML=h;
@@ -2558,7 +3104,7 @@ window.addEventListener('pointerup',e=>{
     if(dragMoved||S.drag.resize)commit();
     if(!dragMoved && !S.drag.resize && S.drag.id){
       const n=byId(S.drag.id);
-      if(n&&n.prompt&&!S.multi.length){
+      if(S.readOnly&&n&&n.prompt&&!S.multi.length){
         uiAlert(n.prompt,n.title||'Node');
       }
     }
@@ -3074,39 +3620,13 @@ document.getElementById('blay').addEventListener('click',()=>{
 document.getElementById('bex').addEventListener('click',async ()=>{
   const ok=await confirmCanvasReplacement('Load example','Replace the current canvas with the example diagram? Unsaved in-memory edits newer than the last autosave will be lost.');
   if(!ok)return;
-  const nextState={
-    title:'Automated security pipeline',
-    nid:200,
-    nodes:[
-      {id:'c1',tp:'cont',ramp:'purple',x:-350,y:-40,w:740,h:720,title:'Automated security pipeline',sub:'',customColor:null,fillOpacity:DEFAULT_SECTION_OPACITY,locked:false},
-      {id:'n1',tp:'two',ramp:'purple',x:-130,y:10,w:260,h:56,title:'Coordinator agent',sub:'Manages policy & orchestration',prompt:'What does the Coordinator agent do?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n2',tp:'two',ramp:'teal',x:-320,y:130,w:180,h:52,title:'Discovery agent',sub:'Maps assets & roles',prompt:'How does the Discovery agent find assets?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n3',tp:'two',ramp:'coral',x:-110,y:130,w:190,h:52,title:'Attack path agent',sub:'Builds path model',prompt:'How does the Attack Path agent model attacker movement?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n4',tp:'one',ramp:'gray',x:110,y:130,w:160,h:44,title:'Memory agent',sub:'',prompt:'What does the Memory agent store?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n5',tp:'two',ramp:'amber',x:-150,y:244,w:300,h:56,title:'Attack path graph',sub:'Full risk map of the system',prompt:'What does the attack path graph contain?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n6',tp:'two',ramp:'red',x:-320,y:364,w:220,h:52,title:'Red validation',sub:'Simulates attacker paths',prompt:'How does the Red Validation agent test paths?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n7',tp:'two',ramp:'blue',x:10,y:364,w:220,h:52,title:'Blue defense',sub:'Applies security fixes',prompt:'How does the Blue Defense agent work?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n8',tp:'two',ramp:'purple',x:-160,y:480,w:320,h:56,title:'Verification agent',sub:'Confirms paths are blocked',prompt:'What does the Verification agent check?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n9',tp:'one',ramp:'green',x:-320,y:600,w:180,h:44,title:'System learns',sub:'',prompt:'How does the system learn from blocked paths?',customColor:null,fillOpacity:1,locked:false},
-      {id:'n10',tp:'one',ramp:'red',x:10,y:600,w:180,h:44,title:'Escalate defenses',sub:'',prompt:'What does escalating defenses involve?',customColor:null,fillOpacity:1,locked:false},
-      {id:'t1',tp:'text',ramp:'text',x:-130,y:680,w:260,h:36,title:'↻ Feeds back to coordinator',sub:'',prompt:'',customColor:null,fillOpacity:1,locked:false},
-    ],
-    edges:[
-      {id:'e1',from:'n1',fp:'bottom',to:'n2',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e2',from:'n1',fp:'bottom',to:'n3',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e3',from:'n1',fp:'bottom',to:'n4',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e4',from:'n2',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e5',from:'n3',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e6',from:'n4',fp:'bottom',to:'n5',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e7',from:'n5',fp:'bottom',to:'n6',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e8',from:'n5',fp:'bottom',to:'n7',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e9',from:'n6',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e10',from:'n7',fp:'bottom',to:'n8',tp:'top',dash:false,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e11',from:'n8',fp:'bottom',to:'n9',tp:'top',dash:false,col:'green',wps:[],label:'path blocked',customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e12',from:'n8',fp:'bottom',to:'n10',tp:'top',dash:false,col:'red',wps:[],label:'still open',customColor:null,labelAnchor:null,labelOffset:null},
-      {id:'e13',from:'n9',fp:'right',to:'n1',tp:'left',dash:true,col:null,wps:[],label:null,customColor:null,labelAnchor:null,labelOffset:null},
-    ]
-  };
+  let nextState;
+  try{
+    nextState=getBuiltInExampleState();
+  }catch(err){
+    uiAlert(err?.message||'The built-in example could not be loaded.','Example unavailable');
+    return;
+  }
   const projectId=S.activeProjectId||generateProjectId();
   applyProjectState(nextState,{projectId,fit:true,markClean:false});
   persistActiveProjectNow({createIfMissing:true});
@@ -3124,11 +3644,57 @@ document.getElementById('bsave').addEventListener('click',()=>{
 document.getElementById('bload-btn').addEventListener('click',openLoadModal);
 document.getElementById('load-close')?.addEventListener('click',closeLoadModal);
 document.getElementById('load-new')?.addEventListener('click',createBlankBrowserProject);
-document.getElementById('load-import')?.addEventListener('click',()=>document.getElementById('bload').click());
+loadImportBtn?.addEventListener('click',()=>setLoadImportOpen(!loadImportState.open,{focus:!loadImportState.open}));
+loadImportFileBtn?.addEventListener('click',()=>document.getElementById('bload').click());
+loadImportText?.addEventListener('input',validateLoadImportText);
+loadImportReplaceBtn?.addEventListener('click',async ()=>{
+  if(loadImportState.status!=='valid'||!loadImportState.parsed)return;
+  await finalizeImportedProject(loadImportState.parsed.nextState,{
+    projectId:S.activeProjectId,
+    warnings:loadImportState.parsed.warnings,
+    confirmTitle:'Import JSON',
+    confirmMessage:'Import this pasted JSON and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.',
+    successMessage:'Project imported into browser storage.'
+  });
+});
+loadImportNewProjectBtn?.addEventListener('click',async ()=>{
+  if(loadImportState.status!=='valid'||!loadImportState.parsed)return;
+  await finalizeImportedProject(loadImportState.parsed.nextState,{
+    projectId:generateProjectId(),
+    warnings:loadImportState.parsed.warnings,
+    confirmTitle:'Import into new project',
+    confirmMessage:'Import this pasted JSON into a new browser project and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.',
+    successMessage:'Project imported into a new browser project.'
+  });
+});
+loadDeleteSelectedBtn?.addEventListener('click',async()=>{
+  if(!loadSelectedProjectIds.size)return;
+  await deleteBrowserProjectsByIds([...loadSelectedProjectIds],{
+    confirmTitle:'Delete selected projects',
+    confirmMessage:`Delete ${loadSelectedProjectIds.size} selected browser projects?`
+  });
+});
+loadClearAllBtn?.addEventListener('click',async()=>{
+  const store=readBrowserStore();
+  if(!store.projects.length)return;
+  await deleteBrowserProjectsByIds(store.projects.map(project=>project.id),{
+    confirmTitle:'Clear all browser projects',
+    confirmMessage:'Delete all browser projects from this browser?'
+  });
+});
 loadModal?.addEventListener('click',e=>{
   if(e.target===loadModal)closeLoadModal();
 });
+dropModal?.addEventListener('click',e=>{
+  if(e.target===dropModal&&dropState.status!=='dragging')closeDropModal();
+});
+dropCloseBtn?.addEventListener('click',closeDropModal);
 window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&dropModal?.classList.contains('open')){
+    e.preventDefault();
+    closeDropModal();
+    return;
+  }
   if(document.getElementById('ui-modal')?.classList.contains('open'))return;
   if(e.key==='Escape'&&loadModal?.classList.contains('open')){
     e.preventDefault();
@@ -3141,75 +3707,82 @@ document.getElementById('bload').addEventListener('change',function(){
   this.value='';
 });
 
-// Central load function — used by both the button and the window drag-drop handler
 async function loadFromFile(file,{replaceProjectId=S.activeProjectId}={}) {
-  if (!file.name.endsWith('.json') && file.type !== 'application/json') {
-    uiAlert('Only .json files exported from ArcFlow can be loaded.', 'Unsupported file');
+  const prepared=await parseImportedProjectFile(file);
+  if(prepared.error){
+    uiAlert(prepared.error,prepared.errorTitle||'Load failed');
     return false;
   }
-  const ok=await confirmCanvasReplacement('Import JSON','Import this JSON file and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.');
-  if(!ok){
-    return false;
-  }
-  const text=await new Promise((resolve,reject)=>{
-    const r = new FileReader();
-    r.onload = ev => resolve(String(ev.target.result||''));
-    r.onerror = () => reject(new Error('Read failed'));
-    r.readAsText(file);
-  }).catch(()=>null);
-  if(text===null){
-    uiAlert('The selected file could not be read.','Load failed');
-    return false;
-  }
-
-  let raw;
-  try { raw = JSON.parse(text); }
-  catch { uiAlert('The file is not valid JSON.', 'Load failed'); return false; }
-
-  let result;
-  try { result = sanitizeLoad(raw); }
-  catch (err) {
-    uiAlert(err.message, 'Incompatible file');
-    return false;
-  }
-
-  const nextState={
-    title:normalizeProjectTitle(result.title, normalizeProjectTitle(file.name.replace(/\.[^.]+$/,''), DEFAULT_PROJECT_TITLE)),
-    nodes:result.nodes,
-    edges:result.edges,
-    nid:result.nid
-  };
-  const projectId=replaceProjectId||generateProjectId();
-  applyProjectState(nextState,{projectId,fit:true,markClean:false});
-  persistActiveProjectNow({createIfMissing:true});
-  closeLoadModal();
-  showToast('Project imported into browser storage.','success');
-
-  if (result.warnings.length) {
-    uiAlert(
-      'File loaded with the following corrections:\n\n' + result.warnings.map(function(w){ return '  - ' + w; }).join('\n'),
-      'Loaded with warnings'
-    );
-  }
-  return true;
+  return finalizeImportedProject(prepared.nextState,{
+    projectId:replaceProjectId||generateProjectId(),
+    warnings:prepared.warnings,
+    confirmTitle:'Import JSON',
+    confirmMessage:'Import this JSON file and replace the current canvas? Unsaved in-memory edits newer than the last autosave will be lost.',
+    successMessage:'Project imported into browser storage.'
+  });
 }
 
-// Allow dragging a .json file onto the browser window (not just the canvas)
-window.addEventListener('dragover', e => {
-  if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+function isExternalFileTransfer(dataTransfer){
+  return !!(dataTransfer&&dataTransfer.types&&Array.from(dataTransfer.types).includes('Files'));
+}
+window.addEventListener('dragenter',e=>{
+  if(document.body.classList.contains('phone-blocked'))return;
+  if(!isExternalFileTransfer(e.dataTransfer))return;
+  e.preventDefault();
+  dropState.dragDepth+=1;
+  if(dropState.status==='hidden'){
+    dropState.active=true;
+    dropState.status='dragging';
+    syncDropModal();
   }
 });
-window.addEventListener('drop', e => {
-  if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+window.addEventListener('dragover',e=>{
+  if(document.body.classList.contains('phone-blocked'))return;
+  if(!isExternalFileTransfer(e.dataTransfer))return;
   e.preventDefault();
-  const file = [...e.dataTransfer.files].find(f => f.name.endsWith('.json'));
-  if (!file) {
-    uiAlert('Only .json files exported from ArcFlow can be dropped into the app.','Unsupported file');
+  e.dataTransfer.dropEffect='copy';
+  if(dropState.status==='hidden'){
+    dropState.active=true;
+    dropState.status='dragging';
+    syncDropModal();
+  }
+});
+window.addEventListener('dragleave',e=>{
+  if(!isExternalFileTransfer(e.dataTransfer))return;
+  dropState.dragDepth=Math.max(0,dropState.dragDepth-1);
+  if(dropState.dragDepth===0&&dropState.status==='dragging')closeDropModal();
+});
+window.addEventListener('drop',e=>{
+  if(!e.dataTransfer||!e.dataTransfer.files||!e.dataTransfer.files.length)return;
+  if(!isExternalFileTransfer(e.dataTransfer))return;
+  e.preventDefault();
+  dropState.dragDepth=0;
+  dropState.parseToken+=1;
+  const files=[...e.dataTransfer.files];
+  const jsonFiles=files.filter(isJsonImportFile);
+  if(!jsonFiles.length){
+    dropState.active=true;
+    dropState.status='invalid';
+    dropState.files=[];
+    dropState.selectedFile=null;
+    dropState.parsed=null;
+    dropState.error='Only .json files exported from ArcFlow can be dropped into the app.';
+    dropState.errorTitle='Unsupported file';
+    syncDropModal();
     return;
   }
-  loadFromFile(file);
+  dropState.active=true;
+  dropState.files=jsonFiles;
+  dropState.selectedFile=null;
+  dropState.parsed=null;
+  dropState.error='';
+  dropState.errorTitle='Import failed';
+  if(jsonFiles.length===1){
+    beginDroppedFileParse(jsonFiles[0]);
+    return;
+  }
+  dropState.status='choosing';
+  syncDropModal();
 });
 
 const EXPORT_DEFAULTS={format:'svg',scale:2,padding:50,backgroundMode:'transparent',jpgQuality:93};
@@ -3247,11 +3820,15 @@ function buildExportSVG(options={}){
     all.forEach(p=>{xs.push(p.x);ys.push(p.y);});
 
     if(e.label){
-      const labelPoint=edgeLabelPoint(e,all);
-      if(!labelPoint)return;
-      const hw=Math.max(e.label.length*7.2+20,38)/2;
-      xs.push(labelPoint.x-hw,labelPoint.x+hw);
-      ys.push(labelPoint.y-9,labelPoint.y+9);
+      const layout=edgeLabelLayout(e,all);
+      if(!layout)return;
+      if(layout.vertical){
+        xs.push(layout.point.x-layout.hitHeight/2,layout.point.x+layout.hitHeight/2);
+        ys.push(layout.point.y-layout.width/2,layout.point.y+layout.width/2);
+      }else{
+        xs.push(layout.point.x-layout.width/2,layout.point.x+layout.width/2);
+        ys.push(layout.point.y-layout.hitHeight/2,layout.point.y+layout.hitHeight/2);
+      }
     }
   });
 
@@ -3279,12 +3856,13 @@ function buildExportSVG(options={}){
     const visuals=resolveEdgeVisuals(e,isDark);
     lines.push(`<path d="${d}" fill="none" stroke="${visuals.stroke}" stroke-width="1.5"${e.dash?' stroke-dasharray="5 4"':''} stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arr)"/>`);
     if(e.label){
-      const labelPoint=edgeLabelPoint(e,points);
-      if(!labelPoint)return;
-      const mx=labelPoint.x,my=labelPoint.y;
-      const tw=Math.max(e.label.length*7.2+20,38);
-      lines.push(`<rect x="${mx-tw/2}" y="${my-8}" width="${tw}" height="16" rx="8" fill="${visuals.labelBg}"/>`);
+      const layout=edgeLabelLayout(e,points);
+      if(!layout)return;
+      const mx=layout.point.x,my=layout.point.y;
+      if(layout.vertical)lines.push(`<g transform="rotate(${layout.angle} ${mx} ${my})">`);
+      lines.push(`<rect x="${mx-layout.width/2}" y="${my-layout.bgHeight/2}" width="${layout.width}" height="${layout.bgHeight}" rx="8" fill="${visuals.labelBg}"/>`);
       lines.push(`<text class="elbl" x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="central" fill="${visuals.labelText}">${esc(e.label)}</text>`);
+      if(layout.vertical)lines.push(`</g>`);
     }
   });
   S.nodes.filter(n=>n.tp!=='cont').forEach(n=>{
@@ -3373,6 +3951,7 @@ function syncExportModalUI(){
   }
   if(qualityValue)qualityValue.textContent=`${exportState.jpgQuality}%`;
   expQualityGroup?.classList.toggle('is-disabled',exportState.format!=='jpg');
+  if(expQualityGroup)expQualityGroup.hidden=exportState.format!=='jpg';
   if(fileInput&&!fileInput.value.trim())fileInput.value=projectFileStem();
   document.getElementById('exp-file-ext').textContent=`.${exportState.format}`;
 }
@@ -3464,6 +4043,7 @@ window.addEventListener('orientationchange',syncPhoneGuard);
 window.visualViewport?.addEventListener('resize',syncPhoneGuard);
 syncProjectTitle();
 syncReadOnlyUi();
+syncLoadImportUi();
 const projectTitleInput=document.getElementById('project-title');
 projectTitleInput?.addEventListener('input',e=>{
   if(S.readOnly)return;

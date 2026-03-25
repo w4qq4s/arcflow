@@ -43,6 +43,7 @@ arcflow/
     css/
       styles.css         All visual styles, tokens, and theme variables
     js/
+      example-project.js Built-in example diagram data
       app.js             Application logic
 ```
 
@@ -94,7 +95,7 @@ arcflow/
 ArcFlow now supports two persistence flows:
 
 - **Browser projects**: recent diagrams are autosaved in `localStorage` and can be reopened from the `Load` dialog
-- **JSON files**: diagrams can still be downloaded as `.json` files and imported back in later
+- **JSON files**: diagrams can still be downloaded as `.json` files and imported back in later, either by choosing a file or pasting full ArcFlow JSON into the `Load` dialog
 
 The default JSON filename uses the current project title when available, or `arcflow-diagram.json` otherwise.
 
