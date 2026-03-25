@@ -265,8 +265,11 @@
       <input class="exp-range" id="exp-quality" type="range" min="60" max="100" step="1" value="93">
     </div>
     <div class="exp-preview">
-      <span class="exp-preview-label">Filename</span>
-      <strong class="exp-preview-value" id="exp-file-preview">untitled-project.svg</strong>
+      <label class="exp-preview-label" for="exp-file-name">Filename</label>
+      <div class="exp-file-row">
+        <input class="exp-input exp-file-input" id="exp-file-name" type="text" maxlength="120" spellcheck="false" placeholder="untitled-project">
+        <span class="exp-file-ext" id="exp-file-ext">.svg</span>
+      </div>
     </div>
     <div class="exp-actions">
       <button class="exp-cancel" id="exp-cancel" type="button">Cancel</button>

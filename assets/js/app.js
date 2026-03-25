@@ -61,9 +61,9 @@ const PAL=[
     {ramp:'pink',tp:'two',title:'Memory store',sub:'Patterns & history'},
   ]},
   {cat:'Sections & groups',items:[
-    {ramp:'gray',tp:'cont',title:'Section',sub:'Group label'},
-    {ramp:'purple',tp:'cont',title:'Phase',sub:'Phase label'},
-    {ramp:'teal',tp:'cont',title:'Zone',sub:'Zone label'},
+    {ramp:'gray',tp:'cont',title:'Section',sub:''},
+    {ramp:'purple',tp:'cont',title:'Phase',sub:''},
+    {ramp:'teal',tp:'cont',title:'Zone',sub:''},
     {ramp:'red',tp:'cont',title:'Attack surface',sub:''},
     {ramp:'amber',tp:'cont',title:'Warning area',sub:''},
   ]},
@@ -209,8 +209,8 @@ function setReadOnly(next,{syncUrl=true,toast=false}={}){
   props();
   if(toast)showToast(S.readOnly?'Read-only mode enabled.':'Read-only mode disabled.',S.readOnly?'info':'success');
 }
-function projectFileStem(){
-  const base=normalizeProjectTitle(S.title,'arcflow-diagram')
+function projectFileStem(title=S.title){
+  const base=normalizeProjectTitle(title,'arcflow-diagram')
     .replace(/[<>:"/\\|?*\x00-\x1F]/g,' ')
     .replace(/\s+/g,'-')
     .replace(/-+/g,'-')
@@ -292,17 +292,19 @@ function _sanitizeNode(n) {
   if (!n || typeof n !== 'object') return null;
   const id = typeof n.id === 'string' && n.id.trim() ? n.id.trim() : null;
   if (!id) return null;
-  const fillOpacity=Number.isFinite(+n.fillOpacity)?clamp(+n.fillOpacity,0,1):(n.tp==='cont'?DEFAULT_SECTION_OPACITY:1);
+  const tp=_VALID_TPS.has(n.tp) ? n.tp : 'one';
+  const fillOpacity=Number.isFinite(+n.fillOpacity)?clamp(+n.fillOpacity,0,1):(tp==='cont'?DEFAULT_SECTION_OPACITY:1);
+  const sub=typeof n.sub === 'string' ? n.sub.slice(0, 300) : '';
   return {
     id,
-    tp    : _VALID_TPS.has(n.tp)    ? n.tp    : 'one',
+    tp,
     ramp  : _VALID_RAMPS.has(n.ramp)? n.ramp  : 'gray',
     x     : Number.isFinite(+n.x)   ? +n.x    : 0,
     y     : Number.isFinite(+n.y)   ? +n.y    : 0,
     w     : (Number.isFinite(+n.w) && +n.w > 0) ? +n.w : 160,
     h     : (Number.isFinite(+n.h) && +n.h > 0) ? +n.h : 44,
     title : typeof n.title  === 'string' ? n.title.slice(0, 300)  : '',
-    sub   : typeof n.sub    === 'string' ? n.sub.slice(0, 300)    : '',
+    sub   : tp==='cont' ? '' : sub,
     prompt: typeof n.prompt === 'string' ? n.prompt.slice(0, 4000): '',
     customColor:normalizeHexColor(n.customColor),
     fillOpacity,
@@ -1198,7 +1200,6 @@ function drawContainers(){
     h+=`<g class="cont-g${sel?' sel':''}${n.locked?' locked':''}" data-nid="${escAttr(n.id)}" data-cont="1">
 <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${SECTION_RX}" fill="${visuals.fill}" stroke="${visuals.stroke}" stroke-width="${sel?2:1}" stroke-dasharray="7 4"/>
 <text class="nt" x="${n.x+14}" y="${n.y+17}" font-size="12" font-weight="500" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.title}">${esc(n.title)}</text>
-${n.sub?`<text class="ns" x="${n.x+14}" y="${n.y+32}" font-size="10" font-family="${FF}" text-anchor="start" dominant-baseline="central" fill="${visuals.sub}">${esc(n.sub)}</text>`:''}
 ${handles}
 <path d="${lpath}" fill="none" stroke="${mixHex(visuals.stroke,themeColors().bg2,0.35)}" stroke-width="${lthk}" stroke-linecap="round" pointer-events="none" opacity=".82"/>
 ${n.locked?renderLockBadge(n.x+n.w-26,n.y+10,visuals.stroke):''}
@@ -1351,9 +1352,11 @@ function renderNodeColorGrid(n){
   const customOn=!!normalizeHexColor(n.customColor);
   const customValue=normalizeHexColor(n.customColor)||nodeAccent(n);
   return`${RNAMES.map(r=>`<button class="rs${!customOn&&n.ramp===r?' on':''}" type="button" style="background:${RMAP[r]}" data-ramp="${r}" title="${r}"></button>`).join('')}
-<button class="rs rs-custom${customOn?' on':''}" type="button" data-ramp="custom" title="Custom color">
-<span class="rs-custom-chip" style="background:${customValue}"></span>
-<span class="rs-custom-label">Custom</span>
+<button class="rs rs-custom${customOn?' on':''}" type="button" data-ramp="custom" title="Custom color" aria-label="Custom color">
+<svg class="rs-custom-icon" viewBox="0 0 20 20" focusable="false" aria-hidden="true" style="--custom-color:${customValue}">
+  <path d="M4.2 14.4 5.4 10.8 12.9 3.3a1.5 1.5 0 0 1 2.1 0l1.7 1.7a1.5 1.5 0 0 1 0 2.1l-7.5 7.5-3.6 1.2Z"></path>
+  <path d="M11.9 4.3 15.7 8.1"></path>
+</svg>
 </button>`;
 }
 function renderEdgeColorButtons(e){
@@ -1366,6 +1369,16 @@ function renderEdgeColorButtons(e){
     const chip=c==='df'?themeColors().t2:EDGE_PRESET_COLORS[c];
     return`<button class="tbb tbb-color${current===c?' on':''}" type="button" data-ecol="${c}"><span class="tbb-chip" style="background:${chip}"></span>${label}</button>`;
   }).join('');
+}
+function openColorPicker(input){
+  if(!input)return;
+  try{
+    if(typeof input.showPicker==='function'){
+      input.showPicker();
+      return;
+    }
+  }catch{}
+  input.click();
 }
 function renderPortButtons(kind,current,disabled=false){
   return PORT_ORDER.map(port=>`<button class="tbb tbb-half${current===port?' on':''}${disabled?' is-disabled':''}" type="button" data-${kind}port="${port}"${disabled?' disabled':''}>${PORT_LABELS[port]}</button>`).join('');
@@ -1382,9 +1395,14 @@ function renderFillOpacityControl(n){
   return`<div class="pr-fill-card" style="--fill-accent:${accent};--fill-percent:${pct}%">
     <div class="pr-fill-top">
       <span class="pr-fill-label">Section fill</span>
-      <span class="pr-fill-pill" id="pfillv">${pct}%</span>
+      <label class="pr-fill-input-wrap" for="pfilln">
+        <button class="pr-fill-step" id="pfilldec" type="button" aria-label="Decrease section fill opacity">−</button>
+        <input class="pr-fill-input" id="pfilln" type="number" min="0" max="100" step="1" value="${pct}" inputmode="numeric" aria-label="Section fill opacity percentage">
+        <span class="pr-fill-suffix">%</span>
+        <button class="pr-fill-step" id="pfillinc" type="button" aria-label="Increase section fill opacity">+</button>
+      </label>
     </div>
-    <input class="pr-range pr-range-rich" id="pfill" type="range" min="0" max="100" step="5" value="${pct}"/>
+    <input class="pr-range pr-range-rich" id="pfill" type="range" min="0" max="100" step="1" value="${pct}"/>
     <div class="pr-fill-presets">
       ${presets.map(value=>`<button class="pr-chip${pct===value?' on':''}" type="button" data-fillset="${value}">${value}%</button>`).join('')}
     </div>
@@ -1507,36 +1525,71 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
     document.querySelectorAll('[data-ramp]').forEach(el=>el.addEventListener('pointerdown',()=>{
       if(el.dataset.ramp==='custom'){
         n.customColor=normalizeHexColor(n.customColor)||nodeAccent(n);
+        commit();draw();props();
+        openColorPicker(document.getElementById('ncustom'));
       }else{
         n.ramp=el.dataset.ramp;
         n.customColor=null;
+        commit();draw();props();
       }
-      commit();draw();props();
     }));
-    document.getElementById('ncustom')?.addEventListener('input',e=>{
+    const ncustom=document.getElementById('ncustom');
+    ncustom?.addEventListener('input',e=>{
+      n.customColor=normalizeHexColor(e.target.value)||nodeAccent(n);
+      draw();
+    });
+    ncustom?.addEventListener('change',e=>{
       n.customColor=normalizeHexColor(e.target.value)||nodeAccent(n);
       commit();draw();props();
     });
     const fillR=document.getElementById('pfill');
-    const fillV=document.getElementById('pfillv');
-    if(fillR&&fillV){
+    const fillN=document.getElementById('pfilln');
+    if(fillR&&fillN){
+      const fillDec=document.getElementById('pfilldec');
+      const fillInc=document.getElementById('pfillinc');
       const fillCard=fillR.closest('.pr-fill-card');
+      const applyFillPercent=(rawPct)=>{
+        const pct=clamp(Math.round(Number(rawPct)||0),0,100);
+        n.fillOpacity=pct/100;
+        return pct;
+      };
       const syncFillUi=()=>{
         const pct=Math.round(nodeFillOpacity(n)*100);
-        fillV.textContent=`${pct}%`;
+        fillR.value=String(pct);
+        fillN.value=String(pct);
         fillCard?.style.setProperty('--fill-percent',`${pct}%`);
         fillCard?.style.setProperty('--fill-accent',nodeAccent(n));
         document.querySelectorAll('[data-fillset]').forEach(btn=>btn.classList.toggle('on',+btn.dataset.fillset===pct));
       };
       fillR.addEventListener('input',e=>{
-        n.fillOpacity=(+e.target.value||0)/100;
+        applyFillPercent(e.target.value);
         syncFillUi();
         draw();
       });
       fillR.addEventListener('change',()=>{commit();props();});
+      fillN.addEventListener('input',e=>{
+        applyFillPercent(e.target.value);
+        syncFillUi();
+        draw();
+      });
+      fillN.addEventListener('change',()=>{syncFillUi();commit();props();});
+      fillN.addEventListener('blur',()=>{syncFillUi();});
+      fillDec?.addEventListener('pointerdown',()=>{
+        applyFillPercent(Math.round(nodeFillOpacity(n)*100)-1);
+        syncFillUi();
+        commit();
+        draw();
+        props();
+      });
+      fillInc?.addEventListener('pointerdown',()=>{
+        applyFillPercent(Math.round(nodeFillOpacity(n)*100)+1);
+        syncFillUi();
+        commit();
+        draw();
+        props();
+      });
       document.querySelectorAll('[data-fillset]').forEach(btn=>btn.addEventListener('pointerdown',()=>{
-        n.fillOpacity=(+btn.dataset.fillset||0)/100;
-        fillR.value=Math.round(n.fillOpacity*100);
+        applyFillPercent(btn.dataset.fillset);
         syncFillUi();
         commit();
         draw();
@@ -1657,13 +1710,20 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
     document.querySelectorAll('[data-ecol]').forEach(el=>el.addEventListener('pointerdown',()=>{
       if(el.dataset.ecol==='custom'){
         e.customColor=normalizeHexColor(e.customColor)||edgeStrokeColor(e);
+        commit();draw();props();
+        openColorPicker(document.getElementById('ecustom'));
       }else{
         e.col=el.dataset.ecol==='df'?null:el.dataset.ecol;
         e.customColor=null;
+        commit();draw();props();
       }
-      commit();draw();props();
     }));
-    document.getElementById('ecustom')?.addEventListener('input',ev=>{
+    const ecustom=document.getElementById('ecustom');
+    ecustom?.addEventListener('input',ev=>{
+      e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
+      draw();
+    });
+    ecustom?.addEventListener('change',ev=>{
       e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
       commit();draw();props();
     });
@@ -1729,7 +1789,7 @@ function addNode(tmpl,x,y){
   S.nodes.push({
     id,tp:tmpl.tp,x:nx,y:ny,w,h,
     ramp:isText?'text':tmpl.ramp,
-    title:tmpl.title,sub:tmpl.sub||'',prompt:'',
+    title:tmpl.title,sub:isCont?'':(tmpl.sub||''),prompt:'',
     customColor:null,
     fillOpacity:isCont?DEFAULT_SECTION_OPACITY:1,
     locked:false
@@ -3018,7 +3078,7 @@ document.getElementById('bex').addEventListener('click',async ()=>{
     title:'Automated security pipeline',
     nid:200,
     nodes:[
-      {id:'c1',tp:'cont',ramp:'purple',x:-350,y:-40,w:740,h:720,title:'Automated security pipeline',sub:'Continuous attack surface management',customColor:null,fillOpacity:DEFAULT_SECTION_OPACITY,locked:false},
+      {id:'c1',tp:'cont',ramp:'purple',x:-350,y:-40,w:740,h:720,title:'Automated security pipeline',sub:'',customColor:null,fillOpacity:DEFAULT_SECTION_OPACITY,locked:false},
       {id:'n1',tp:'two',ramp:'purple',x:-130,y:10,w:260,h:56,title:'Coordinator agent',sub:'Manages policy & orchestration',prompt:'What does the Coordinator agent do?',customColor:null,fillOpacity:1,locked:false},
       {id:'n2',tp:'two',ramp:'teal',x:-320,y:130,w:180,h:52,title:'Discovery agent',sub:'Maps assets & roles',prompt:'How does the Discovery agent find assets?',customColor:null,fillOpacity:1,locked:false},
       {id:'n3',tp:'two',ramp:'coral',x:-110,y:130,w:190,h:52,title:'Attack path agent',sub:'Builds path model',prompt:'How does the Attack Path agent model attacker movement?',customColor:null,fillOpacity:1,locked:false},
@@ -3210,7 +3270,6 @@ function buildExportSVG(options={}){
     const visuals=resolveNodeVisuals(n,isDark);
     lines.push(`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${SECTION_RX}" fill="${visuals.fill}" stroke="${visuals.stroke}" stroke-width="1" stroke-dasharray="7 4"/>`);
     lines.push(`<text class="nt" x="${n.x+14}" y="${n.y+17}" fill="${visuals.title}" dominant-baseline="central">${esc(n.title)}</text>`);
-    if(n.sub)lines.push(`<text class="ns" x="${n.x+14}" y="${n.y+32}" fill="${visuals.sub}" dominant-baseline="central">${esc(n.sub)}</text>`);
   });
   S.edges.forEach(e=>{
     const fn=byId(e.from),tn=byId(e.to);if(!fn||!tn)return;
@@ -3247,7 +3306,7 @@ function doExport(options={}){
   const opts=normalizeExportOptions(options);
   if(!S.nodes.length){uiAlert('There is nothing to export yet. Add at least one node first.','Export');return;}
   const {svgStr,W,H}=buildExportSVG(opts);
-  const fileStem=projectFileStem();
+  const fileStem=projectFileStem(opts.fileName||S.title);
   if(opts.format==='svg'){
     const blob=new Blob([svgStr],{type:'image/svg+xml'});
     const url=URL.createObjectURL(blob);
@@ -3292,6 +3351,7 @@ const expCloseBtn=document.getElementById('exp-close');
 const expQualityGroup=document.getElementById('exp-quality')?.closest('.exp-group');
 function syncExportModalUI(){
   exportState=normalizeExportOptions(exportState);
+  const fileInput=document.getElementById('exp-file-name');
   document.querySelectorAll('#exp-modal [data-fmt]').forEach(btn=>{
     btn.classList.toggle('on',btn.dataset.fmt===exportState.format);
   });
@@ -3313,7 +3373,8 @@ function syncExportModalUI(){
   }
   if(qualityValue)qualityValue.textContent=`${exportState.jpgQuality}%`;
   expQualityGroup?.classList.toggle('is-disabled',exportState.format!=='jpg');
-  document.getElementById('exp-file-preview').textContent=`${projectFileStem()}.${exportState.format}`;
+  if(fileInput&&!fileInput.value.trim())fileInput.value=projectFileStem();
+  document.getElementById('exp-file-ext').textContent=`.${exportState.format}`;
 }
 function closeExportModal(){
   expModal.classList.remove('open');
@@ -3322,6 +3383,8 @@ function closeExportModal(){
 function openExportModal(){
   if(isAppDialogOpen())return;
   if(!S.nodes.length){uiAlert('There is nothing to export yet. Add at least one node first.','Export');return;}
+  const fileInput=document.getElementById('exp-file-name');
+  if(fileInput)fileInput.value=projectFileStem();
   syncExportModalUI();
   expModal.classList.add('open');
   expModal.setAttribute('aria-hidden','false');
@@ -3333,6 +3396,7 @@ document.getElementById('bexp').addEventListener('click',openExportModal);
 document.getElementById('exp-cancel').addEventListener('click',closeExportModal);
 document.getElementById('exp-confirm').addEventListener('click',()=>{
   const opts=normalizeExportOptions(exportState);
+  opts.fileName=document.getElementById('exp-file-name')?.value||projectFileStem();
   closeExportModal();
   doExport(opts);
 });
@@ -3363,6 +3427,10 @@ document.getElementById('exp-padding')?.addEventListener('input',e=>{
 });
 document.getElementById('exp-quality')?.addEventListener('input',e=>{
   exportState.jpgQuality=clamp(+e.target.value||EXPORT_DEFAULTS.jpgQuality,60,100);
+  syncExportModalUI();
+});
+document.getElementById('exp-file-name')?.addEventListener('blur',e=>{
+  e.target.value=projectFileStem(e.target.value||S.title);
   syncExportModalUI();
 });
 expModal.addEventListener('click',e=>{
