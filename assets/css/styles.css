@@ -825,7 +825,10 @@ body.dark #minimap{background:rgba(21,26,32,.96)}
   pointer-events:none;
 }
 
-#cw.has-nodes #empty-state{opacity:0}
+#cw.has-nodes #empty-state{
+  opacity:0;
+  visibility:hidden;
+}
 
 .empty-icon{
   width:54px;
@@ -862,6 +865,10 @@ body.dark #minimap{background:rgba(21,26,32,.96)}
   pointer-events:all;
   font-size:12px;
   font-weight:600;
+}
+
+#cw.has-nodes #empty-state .empty-btn{
+  pointer-events:none;
 }
 
 .prh{
