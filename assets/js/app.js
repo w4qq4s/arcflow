@@ -1970,6 +1970,22 @@ function props(){
     prb.innerHTML=`<div class="pempty">${S.readOnly?'Read-only mode is on<br>Select a node or edge to inspect it':'Select a node or edge<br>to edit its properties'}</div>`;
     return;
   }
+  const bindPanelButtons=(selector,handler)=>{
+    prb.querySelectorAll(selector).forEach(el=>el.addEventListener('click',ev=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      handler(el,ev);
+    }));
+  };
+  const bindPanelButtonById=(id,handler)=>{
+    const el=prb.querySelector(`#${id}`);
+    if(!el)return;
+    el.addEventListener('click',ev=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      handler(el,ev);
+    });
+  };
   if(S.selT==='node'){
     const n=byId(S.sel);if(!n)return;
     const isCont=n.tp==='cont';
@@ -2019,7 +2035,7 @@ ${!isCont?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.le
 ${!isCont&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
 ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}
 <button class="delbtn pr-secondary-btn" id="punlock">Unlock ${isCont?'section':'node'}</button>`;
-      document.getElementById('punlock')?.addEventListener('pointerdown',()=>{
+      bindPanelButtonById('punlock',()=>{
         n.locked=false;
         commit();
         draw();
@@ -2068,7 +2084,7 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
     const wi=document.getElementById('pw'),hi=document.getElementById('ph2');
     if(wi){wi.addEventListener('change',e=>{n.w=Math.max(80,+e.target.value||80);draw();commit();props();});}
     if(hi){hi.addEventListener('change',e=>{n.h=Math.max(50,+e.target.value||50);draw();commit();props();});}
-    document.querySelectorAll('[data-ramp]').forEach(el=>el.addEventListener('pointerdown',()=>{
+    bindPanelButtons('[data-ramp]',el=>{
       if(el.dataset.ramp==='custom'){
         n.customColor=normalizeHexColor(n.customColor)||nodeAccent(n);
         commit();draw();props();
@@ -2078,7 +2094,7 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
         n.customColor=null;
         commit();draw();props();
       }
-    }));
+    });
     const ncustom=document.getElementById('ncustom');
     ncustom?.addEventListener('input',e=>{
       n.customColor=normalizeHexColor(e.target.value)||nodeAccent(n);
@@ -2120,37 +2136,40 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
       });
       fillN.addEventListener('change',()=>{syncFillUi();commit();props();});
       fillN.addEventListener('blur',()=>{syncFillUi();});
-      fillDec?.addEventListener('pointerdown',()=>{
+      fillDec?.addEventListener('click',ev=>{
+        ev.preventDefault();
+        ev.stopPropagation();
         applyFillPercent(Math.round(nodeFillOpacity(n)*100)-1);
         syncFillUi();
         commit();
         draw();
         props();
       });
-      fillInc?.addEventListener('pointerdown',()=>{
+      fillInc?.addEventListener('click',ev=>{
+        ev.preventDefault();
+        ev.stopPropagation();
         applyFillPercent(Math.round(nodeFillOpacity(n)*100)+1);
         syncFillUi();
         commit();
         draw();
         props();
       });
-      document.querySelectorAll('[data-fillset]').forEach(btn=>btn.addEventListener('pointerdown',()=>{
+      bindPanelButtons('[data-fillset]',btn=>{
         applyFillPercent(btn.dataset.fillset);
         syncFillUi();
         commit();
         draw();
         props();
-      }));
+      });
       syncFillUi();
     }
-    document.querySelectorAll('[data-ntp]').forEach(el=>el.addEventListener('pointerdown',()=>{
+    bindPanelButtons('[data-ntp]',el=>{
       n.tp=el.dataset.ntp;
       n.h=nH(n.tp);
       n.w=nW(n.title,n.sub);
       commit();draw();props();
-    }));
-    document.querySelectorAll('[data-deled]').forEach(el=>el.addEventListener('pointerdown',ev=>{
-      ev.stopPropagation();
+    });
+    bindPanelButtons('[data-deled]',el=>{
       const edge=edById(el.dataset.deled);
       if(edge&&(isEdgeEndpointLocked(edge,'from')||isEdgeEndpointLocked(edge,'to'))){
         showToast('Edges connected to locked items cannot be removed here.','info');
@@ -2158,15 +2177,15 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
       }
       S.edges=S.edges.filter(e=>e.id!==el.dataset.deled);
       commit();draw();props();
-    }));
-    document.getElementById('plock')?.addEventListener('pointerdown',()=>{
+    });
+    bindPanelButtonById('plock',()=>{
       n.locked=true;
       commit();
       draw();
       props();
       showToast(`${nodeKindLabel(n)} locked.`,'success');
     });
-    document.getElementById('pdel')?.addEventListener('pointerdown',()=>{
+    bindPanelButtonById('pdel',()=>{
       if(nodeTouchesLockedNeighbor(S.sel)){
         showToast('This item is connected to a locked node and cannot be deleted yet.','info');
         return;
@@ -2234,8 +2253,8 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
     const lblI=document.getElementById('elbl');
     lblI.addEventListener('input',ev=>{e.label=ev.target.value||null;draw();scheduleAutosave();});
     lblI.addEventListener('blur',commit);
-    document.querySelectorAll('[data-estl]').forEach(el=>el.addEventListener('pointerdown',()=>{e.dash=el.dataset.estl==='1';commit();draw();props();}));
-    document.querySelectorAll('[data-fport]').forEach(el=>el.addEventListener('pointerdown',()=>{
+    bindPanelButtons('[data-estl]',el=>{e.dash=el.dataset.estl==='1';commit();draw();props();});
+    bindPanelButtons('[data-fport]',el=>{
       if(fromLocked){
         showToast('The source node is locked, so its connection side cannot be changed.','info');
         return;
@@ -2243,8 +2262,8 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
       e.fp=el.dataset.fport;
       if(!e.wps?.length)e.wps=[];
       commit();draw();props();
-    }));
-    document.querySelectorAll('[data-tport]').forEach(el=>el.addEventListener('pointerdown',()=>{
+    });
+    bindPanelButtons('[data-tport]',el=>{
       if(toLocked){
         showToast('The target node is locked, so its connection side cannot be changed.','info');
         return;
@@ -2252,8 +2271,8 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
       e.tp=el.dataset.tport;
       if(!e.wps?.length)e.wps=[];
       commit();draw();props();
-    }));
-    document.querySelectorAll('[data-ecol]').forEach(el=>el.addEventListener('pointerdown',()=>{
+    });
+    bindPanelButtons('[data-ecol]',el=>{
       if(el.dataset.ecol==='custom'){
         e.customColor=normalizeHexColor(e.customColor)||edgeStrokeColor(e);
         commit();draw();props();
@@ -2263,7 +2282,7 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
         e.customColor=null;
         commit();draw();props();
       }
-    }));
+    });
     const ecustom=document.getElementById('ecustom');
     ecustom?.addEventListener('input',ev=>{
       e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
@@ -2273,9 +2292,9 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
       e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
       commit();draw();props();
     });
-    document.getElementById('ereset')?.addEventListener('pointerdown',()=>{e.wps=[];commit();draw();props();});
-    document.getElementById('elabelreset')?.addEventListener('pointerdown',()=>{e.labelAnchor=null;e.labelOffset=null;commit();draw();props();});
-    document.getElementById('edel')?.addEventListener('pointerdown',()=>{
+    bindPanelButtonById('ereset',()=>{e.wps=[];commit();draw();props();});
+    bindPanelButtonById('elabelreset',()=>{e.labelAnchor=null;e.labelOffset=null;commit();draw();props();});
+    bindPanelButtonById('edel',()=>{
       if(isEdgeEndpointLocked(e,'from')||isEdgeEndpointLocked(e,'to')){
         showToast('Edges connected to locked items cannot be deleted.','info');
         return;
