@@ -1045,6 +1045,18 @@ body.dark #minimap{background:rgba(21,26,32,.96)}
   cursor:pointer;
 }
 
+.pr-color-input.is-hidden{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:0;
+  border:0;
+  opacity:0;
+  pointer-events:none;
+  overflow:hidden;
+}
+
 .pr-color-input::-webkit-color-swatch-wrapper{padding:0}
 .pr-color-input::-webkit-color-swatch{border:none;border-radius:var(--r2)}
 

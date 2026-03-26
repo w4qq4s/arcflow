@@ -2051,7 +2051,7 @@ ${!isCont?`<div class="prl">Subtitle</div><input class="pri" id="ps" value="${es
 <div class="prl">Click prompt</div><textarea class="prta" id="pp" placeholder="Question shown when this node is clicked...">${esc(n.prompt||'')}</textarea>`:''}
 <div class="prl">Color</div>
 <div class="rg">${renderNodeColorGrid(n)}</div>
-${hasCustomColor?`<input class="pri pr-color-input" id="ncustom" type="color" value="${normalizeHexColor(n.customColor)||nodeAccent(n)}"/>`:''}
+<input class="pri pr-color-input${hasCustomColor?'':' is-hidden'}" id="ncustom" type="color" value="${normalizeHexColor(n.customColor)||nodeAccent(n)}"${hasCustomColor?'':' aria-hidden="true" tabindex="-1"'}/>
 ${isCont?`<div class="prl">Fill opacity</div>
 ${renderFillOpacityControl(n)}
 <div class="prl">Size</div>
@@ -2084,25 +2084,50 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
     const wi=document.getElementById('pw'),hi=document.getElementById('ph2');
     if(wi){wi.addEventListener('change',e=>{n.w=Math.max(80,+e.target.value||80);draw();commit();props();});}
     if(hi){hi.addEventListener('change',e=>{n.h=Math.max(50,+e.target.value||50);draw();commit();props();});}
+    const ncustom=document.getElementById('ncustom');
+    const syncNodeCustomUi=(value,active=true)=>{
+      prb.querySelectorAll('[data-ramp]').forEach(btn=>btn.classList.toggle('on',active?btn.dataset.ramp==='custom':btn.dataset.ramp===n.ramp));
+      const icon=prb.querySelector('.rs-custom-icon');
+      if(icon)icon.style.setProperty('--custom-color',value||nodeAccent(n));
+      if(ncustom){
+        ncustom.value=value||nodeAccent(n);
+        ncustom.classList.toggle('is-hidden',!active);
+        if(active){
+          ncustom.removeAttribute('aria-hidden');
+          ncustom.removeAttribute('tabindex');
+        }else{
+          ncustom.setAttribute('aria-hidden','true');
+          ncustom.setAttribute('tabindex','-1');
+        }
+      }
+    };
+    ['pointerdown','click'].forEach(type=>ncustom?.addEventListener(type,ev=>ev.stopPropagation()));
     bindPanelButtons('[data-ramp]',el=>{
       if(el.dataset.ramp==='custom'){
-        n.customColor=normalizeHexColor(n.customColor)||nodeAccent(n);
-        commit();draw();props();
-        openColorPicker(document.getElementById('ncustom'));
+        const nextColor=normalizeHexColor(n.customColor)||nodeAccent(n);
+        n.customColor=nextColor;
+        commit();
+        draw();
+        syncNodeCustomUi(nextColor,true);
+        requestAnimationFrame(()=>openColorPicker(ncustom));
       }else{
         n.ramp=el.dataset.ramp;
         n.customColor=null;
         commit();draw();props();
       }
     });
-    const ncustom=document.getElementById('ncustom');
     ncustom?.addEventListener('input',e=>{
-      n.customColor=normalizeHexColor(e.target.value)||nodeAccent(n);
+      const nextColor=normalizeHexColor(e.target.value)||nodeAccent(n);
+      n.customColor=nextColor;
+      syncNodeCustomUi(nextColor,true);
       draw();
     });
     ncustom?.addEventListener('change',e=>{
-      n.customColor=normalizeHexColor(e.target.value)||nodeAccent(n);
-      commit();draw();props();
+      const nextColor=normalizeHexColor(e.target.value)||nodeAccent(n);
+      n.customColor=nextColor;
+      syncNodeCustomUi(nextColor,true);
+      commit();
+      draw();
     });
     const fillR=document.getElementById('pfill');
     const fillN=document.getElementById('pfilln');
@@ -2235,7 +2260,7 @@ ${fromLocked||toLocked?`<div class="tip">${fromLocked?'The source node is locked
 ${fromLocked||toLocked?`<div class="tip">${fromLocked?'The source node is locked, so its connection side cannot be changed. ':''}${toLocked?'The target node is locked, so its connection side cannot be changed.':''}</div>`:''}
 <div class="prl">Color</div>
 <div class="tbg tbg-wrap">${renderEdgeColorButtons(e)}</div>
-${hasCustomColor?`<input class="pri pr-color-input" id="ecustom" type="color" value="${normalizeHexColor(e.customColor)||edgeStrokeColor(e)}"/>`:''}
+<input class="pri pr-color-input${hasCustomColor?'':' is-hidden'}" id="ecustom" type="color" value="${normalizeHexColor(e.customColor)||edgeStrokeColor(e)}"${hasCustomColor?'':' aria-hidden="true" tabindex="-1"'}/>
 </div>
 <div class="pdv"></div>
 <div class="pstat"><span>From</span><span>${esc(fn?.title||'?')}</span></div>
@@ -2272,25 +2297,50 @@ ${wc===0?`<div class="tip">Drag the line to bend it. Drag the blue handles to mo
       if(!e.wps?.length)e.wps=[];
       commit();draw();props();
     });
+    const ecustom=document.getElementById('ecustom');
+    const syncEdgeCustomUi=(value,active=true)=>{
+      prb.querySelectorAll('[data-ecol]').forEach(btn=>btn.classList.toggle('on',active?btn.dataset.ecol==='custom':btn.dataset.ecol===(e.col||'df')));
+      const chip=prb.querySelector('[data-ecol="custom"] .tbb-chip');
+      if(chip)chip.style.background=value||edgeStrokeColor(e);
+      if(ecustom){
+        ecustom.value=value||edgeStrokeColor(e);
+        ecustom.classList.toggle('is-hidden',!active);
+        if(active){
+          ecustom.removeAttribute('aria-hidden');
+          ecustom.removeAttribute('tabindex');
+        }else{
+          ecustom.setAttribute('aria-hidden','true');
+          ecustom.setAttribute('tabindex','-1');
+        }
+      }
+    };
+    ['pointerdown','click'].forEach(type=>ecustom?.addEventListener(type,ev=>ev.stopPropagation()));
     bindPanelButtons('[data-ecol]',el=>{
       if(el.dataset.ecol==='custom'){
-        e.customColor=normalizeHexColor(e.customColor)||edgeStrokeColor(e);
-        commit();draw();props();
-        openColorPicker(document.getElementById('ecustom'));
+        const nextColor=normalizeHexColor(e.customColor)||edgeStrokeColor(e);
+        e.customColor=nextColor;
+        commit();
+        draw();
+        syncEdgeCustomUi(nextColor,true);
+        requestAnimationFrame(()=>openColorPicker(ecustom));
       }else{
         e.col=el.dataset.ecol==='df'?null:el.dataset.ecol;
         e.customColor=null;
         commit();draw();props();
       }
     });
-    const ecustom=document.getElementById('ecustom');
     ecustom?.addEventListener('input',ev=>{
-      e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
+      const nextColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
+      e.customColor=nextColor;
+      syncEdgeCustomUi(nextColor,true);
       draw();
     });
     ecustom?.addEventListener('change',ev=>{
-      e.customColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
-      commit();draw();props();
+      const nextColor=normalizeHexColor(ev.target.value)||edgeStrokeColor(e);
+      e.customColor=nextColor;
+      syncEdgeCustomUi(nextColor,true);
+      commit();
+      draw();
     });
     bindPanelButtonById('ereset',()=>{e.wps=[];commit();draw();props();});
     bindPanelButtonById('elabelreset',()=>{e.labelAnchor=null;e.labelOffset=null;commit();draw();props();});
