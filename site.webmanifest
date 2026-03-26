@@ -1,0 +1,17 @@
+{
+  "name": "ArcFlow",
+  "short_name": "ArcFlow",
+  "description": "Browser-based flow diagramming for clean node-and-edge workflows with smart snapping, browser projects, JSON import/export, and export tools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#151A20",
+  "theme_color": "#151A20",
+  "icons": [
+    {
+      "src": "assets/icons/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

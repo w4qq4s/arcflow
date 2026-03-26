@@ -2,6 +2,8 @@
 
 ArcFlow is a browser-based diagramming tool for building clean node-and-edge flow diagrams for workflows, system maps, architecture views, and analysis boards. It runs entirely in the browser with no backend, no dependencies, and no build step.
 
+![ArcFlow preview](assets/icons/readme-preview.png)
+
 ## Highlights
 
 - Drag nodes from the sidebar onto the canvas
