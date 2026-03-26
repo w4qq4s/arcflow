@@ -2541,6 +2541,7 @@ const HELP_TEXT=[
   'Drag from a + handle to a target port  Connect nodes',
   'Click a target node  Fallback connection flow',
   'Drag to select nodes and edges  Box-select items',
+  'Shift + drag a section  Move the section and its enclosed unlocked items together',
   'Ctrl + drag or middle-mouse drag  Pan',
   'Ctrl + scroll or pinch  Zoom',
   'Snap on  Enable grid, alignment, and bend snapping',
@@ -2588,6 +2589,7 @@ const HELP_SECTIONS=[
       {keys:['Drag from + handle'],desc:'Drop on a target port to connect nodes'},
       {keys:['Click target node'],desc:'Fallback connection flow when connect mode is already active'},
       {keys:['Drag to select'],desc:'Box-select nodes and edges on the canvas'},
+      {keys:['Shift + drag section'],desc:'Move a section together with its enclosed unlocked nodes and their internal routed edges'},
       {keys:['Ctrl + drag','Middle-mouse drag'],desc:'Pan the canvas'},
       {keys:['Ctrl + scroll','Pinch'],desc:'Zoom in or out'},
       {keys:['Snap on'],desc:'Enable grid, alignment, and bend snapping'},
@@ -2989,8 +2991,15 @@ cw.addEventListener('pointerdown',e=>{
       S.sel=nid;S.selT='node';draw();props();
       if(S.readOnly)return;
       if(node.locked)return;
-      S.drag={id:nid,ox:pos.x-node.x,oy:pos.y-node.y,originX:node.x,originY:node.y};
-      if(node.tp==='cont'){
+      S.drag={
+        id:nid,
+        ox:pos.x-node.x,
+        oy:pos.y-node.y,
+        originX:node.x,
+        originY:node.y,
+        moveContents:node.tp==='cont'&&e.shiftKey
+      };
+      if(node.tp==='cont'&&S.drag.moveContents){
         const movableChildren=getContainerChildren(node.id).filter(c=>!c.locked);
         S.drag.childOffsets=movableChildren.map(c=>({id:c.id,ox:c.x-node.x,oy:c.y-node.y}));
         S.drag.edgeWaypointOrigins=captureMovedEdgeWaypoints(movableChildren.map(c=>c.id));
@@ -3063,7 +3072,7 @@ window.addEventListener('pointermove',e=>{
         const aligned=smartAlignRect(rectAt(nx,ny,n.w,n.h),new Set([n.id]));
         nx=aligned.x;ny=aligned.y;S.guides=aligned.guides;
 
-        if(n.tp==='cont'&&S.drag.childOffsets){
+        if(n.tp==='cont'&&S.drag.moveContents&&S.drag.childOffsets){
           S.drag.childOffsets.forEach(({id,ox,oy})=>{const c=byId(id);if(c){c.x=nx+ox;c.y=ny+oy;}});
           applyMovedEdgeWaypoints(
             S.drag.edgeWaypointOrigins,
