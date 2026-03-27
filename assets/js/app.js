@@ -1266,7 +1266,9 @@ function pickReadableText(bgHex,isDark=isDarkTheme()){
   return contrastRatio(bgHex,theme.t1)>=contrastRatio(bgHex,theme.bg1)?theme.t1:theme.bg1;
 }
 function nodeAccent(n,isDark=isDarkTheme()){
-  return normalizeHexColor(n.customColor)||(n.tp==='text'||n.ramp==='text'?themeColors(isDark).t2:RMAP[n.ramp])||RMAP.gray;
+  return normalizeHexColor(n.customColor)
+    || RMAP[n.ramp]
+    || ((n.tp==='text'||n.ramp==='text')?themeColors(isDark).t2:RMAP.gray);
 }
 function nodeFillOpacity(n){
   return n.tp==='cont'
@@ -1931,7 +1933,7 @@ function renderPortButtons(kind,current,disabled=false){
 }
 function nodeKindLabel(n){
   if(n.tp==='cont')return'Section';
-  if(n.tp==='text')return'Text node';
+  if(n.tp==='text')return'Annotation';
   return'Node';
 }
 function renderFillOpacityControl(n){
@@ -1989,8 +1991,11 @@ function props(){
   if(S.selT==='node'){
     const n=byId(S.sel);if(!n)return;
     const isCont=n.tp==='cont';
+    const isText=n.tp==='text';
+    const itemLabel=isCont?'section':(isText?'annotation':'node');
+    const allowConnections=!isCont&&!isText;
     const hasCustomColor=!!normalizeHexColor(n.customColor);
-    prh.textContent=isCont?'Section properties':'Node properties';
+    prh.textContent=isCont?'Section properties':(isText?'Annotation properties':'Node properties');
     const outs=S.edges.filter(e=>e.from===n.id);
     const ins=S.edges.filter(e=>e.to===n.id);
     const connectionHtml=editable=>[
@@ -1998,12 +2003,12 @@ function props(){
       ...ins.map(e=>{const f=byId(e.from);return f?`<div class="ci"><div class="cdot" style="background:${nodeAccent(f)}"></div><span class="clbl">← ${esc(f.title)}</span>${editable?`<span class="cdel" data-deled="${escAttr(e.id)}">✕</span>`:''}</div>`:'';}),
     ].join('');
     if(S.readOnly){
-      prh.textContent=isCont?'Section overview':'Node overview';
+      prh.textContent=isCont?'Section overview':(isText?'Annotation overview':'Node overview');
       prb.innerHTML=`<div class="prs">
 <div class="pr-lock-card">
   <div class="pr-lock-kicker">${nodeKindLabel(n)}</div>
   <div class="pr-lock-title">${esc(n.title||'Untitled')}</div>
-  <div class="pr-lock-copy">Read-only mode is on. You can inspect this ${isCont?'section':'node'}, but editing is disabled.</div>
+  <div class="pr-lock-copy">Read-only mode is on. You can inspect this ${itemLabel}, but editing is disabled.</div>
   <div class="pr-lock-pill">Read only</div>
 </div>
 </div>
@@ -2011,12 +2016,12 @@ function props(){
 <div class="pstat"><span>Position</span><span>${Math.round(n.x)}, ${Math.round(n.y)}</span></div>
 <div class="pstat"><span>Size</span><span>${Math.round(n.w)} × ${Math.round(n.h)}</span></div>
 <div class="pstat"><span>Color</span><span>${esc(hasCustomColor?'Custom':(n.ramp==='text'?'Text':n.ramp))}</span></div>
-${isCont?`<div class="pstat"><span>Fill opacity</span><span>${Math.round(nodeFillOpacity(n)*100)}%</span></div>`:`<div class="pstat"><span>Node type</span><span>${n.tp==='two'?'Two line':n.tp==='one'?'Single line':'Text'}</span></div>`}
+${isCont?`<div class="pstat"><span>Fill opacity</span><span>${Math.round(nodeFillOpacity(n)*100)}%</span></div>`:(!isText?`<div class="pstat"><span>Node type</span><span>${n.tp==='two'?'Two line':n.tp==='one'?'Single line':'Text'}</span></div>`:'')}
 ${n.locked?`<div class="pstat"><span>Locked</span><span>Yes</span></div>`:''}
-${!isCont?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
-${!isCont&&n.sub?`<div class="prs"><div class="prl">Subtitle</div><div class="pr-lock-note">${esc(n.sub)}</div></div>`:''}
-${!isCont&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
-${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}`;
+${allowConnections?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
+${!isCont&&n.sub?`<div class="prs"><div class="prl">${isText?'Secondary line':'Subtitle'}</div><div class="pr-lock-note">${esc(n.sub)}</div></div>`:''}
+${allowConnections&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
+${allowConnections&&(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}`;
       return;
     }
     if(n.locked){
@@ -2024,17 +2029,18 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
 <div class="pr-lock-card">
   <div class="pr-lock-kicker">${nodeKindLabel(n)}</div>
   <div class="pr-lock-title">${esc(n.title||'Untitled')}</div>
-  <div class="pr-lock-copy">This ${isCont?'section':'node'} is locked. Unlock it to edit its content, styling, layout, or connections.</div>
+  <div class="pr-lock-copy">This ${itemLabel} is locked. Unlock it to edit its content, styling, layout, or${allowConnections?' connections.':' make changes.'}</div>
   <div class="pr-lock-pill">Locked</div>
 </div>
 </div>
 <div class="pdv"></div>
 <div class="pstat"><span>Position</span><span>${Math.round(n.x)}, ${Math.round(n.y)}</span></div>
 <div class="pstat"><span>Size</span><span>${Math.round(n.w)} × ${Math.round(n.h)}</span></div>
-${!isCont?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
-${!isCont&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
-${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}
-<button class="delbtn pr-secondary-btn" id="punlock">Unlock ${isCont?'section':'node'}</button>`;
+${allowConnections?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
+${!isCont&&n.sub?`<div class="prs"><div class="prl">${isText?'Secondary line':'Subtitle'}</div><div class="pr-lock-note">${esc(n.sub)}</div></div>`:''}
+${allowConnections&&n.prompt?`<div class="prs"><div class="prl">Click prompt</div><div class="pr-lock-note">${esc(n.prompt)}</div></div>`:''}
+${allowConnections&&(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(false)}`:''}
+<button class="delbtn pr-secondary-btn" id="punlock">Unlock ${itemLabel}</button>`;
       bindPanelButtonById('punlock',()=>{
         n.locked=false;
         commit();
@@ -2045,10 +2051,10 @@ ${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div cl
       return;
     }
     prb.innerHTML=`<div class="prs">
-<div class="prl">Title</div>
-<input class="pri" id="pt" value="${esc(n.title)}" placeholder="Label"/>
-${!isCont?`<div class="prl">Subtitle</div><input class="pri" id="ps" value="${esc(n.sub||'')}" placeholder="Short description (two-line only)"/>
-<div class="prl">Click prompt</div><textarea class="prta" id="pp" placeholder="Question shown when this node is clicked...">${esc(n.prompt||'')}</textarea>`:''}
+<div class="prl">${isText?'Text':'Title'}</div>
+<input class="pri" id="pt" value="${esc(n.title)}" placeholder="${isText?'Annotation text':'Label'}"/>
+${!isCont?`<div class="prl">${isText?'Secondary line':'Subtitle'}</div><input class="pri" id="ps" value="${esc(n.sub||'')}" placeholder="${isText?'Optional second line':'Short description (two-line only)'}"/>`:''}
+${allowConnections?`<div class="prl">Click prompt</div><textarea class="prta" id="pp" placeholder="Question shown when this node is clicked...">${esc(n.prompt||'')}</textarea>`:''}
 <div class="prl">Color</div>
 <div class="rg">${renderNodeColorGrid(n)}</div>
 <input class="pri pr-color-input${hasCustomColor?'':' is-hidden'}" id="ncustom" type="color" value="${normalizeHexColor(n.customColor)||nodeAccent(n)}"${hasCustomColor?'':' aria-hidden="true" tabindex="-1"'}/>
@@ -2058,21 +2064,21 @@ ${renderFillOpacityControl(n)}
 <div class="pr-stack">
 <input class="pri" id="pw" type="number" value="${Math.round(n.w)}" min="80" style="margin-bottom:0;text-align:center;" placeholder="W"/>
 <input class="pri" id="ph2" type="number" value="${Math.round(n.h)}" min="50" style="margin-bottom:0;text-align:center;" placeholder="H"/>
-</div>`:`<div class="prl">Node type</div>
+</div>`:(!isText?`<div class="prl">Node type</div>
 <div class="tbg">
 <button class="tbb${n.tp==='one'?' on':''}" type="button" data-ntp="one">Single line</button>
 <button class="tbb${n.tp==='two'?' on':''}" type="button" data-ntp="two">Two line</button>
-</div>`}
+</div>`:'')}
 <div class="pr-aux-actions">
-  <button class="tbb" type="button" id="plock">Lock ${isCont?'section':'node'}</button>
+  <button class="tbb" type="button" id="plock">Lock ${itemLabel}</button>
 </div>
 </div>
 <div class="pdv"></div>
 <div class="pstat"><span>Position</span><span>${Math.round(n.x)}, ${Math.round(n.y)}</span></div>
 <div class="pstat"><span>Size</span><span>${Math.round(n.w)} × ${Math.round(n.h)}</span></div>
-${!isCont?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
-${(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(true)}`:''}
-<button class="delbtn" id="pdel">Delete ${isCont?'section':'node'}</button>`;
+${allowConnections?`<div class="pstat"><span>Connections</span><span>${outs.length+ins.length}</span></div>`:''}
+${allowConnections&&(outs.length||ins.length)?`<div class="prs" style="padding-bottom:2px"><div class="prl" style="margin-bottom:6px">Connections</div></div>${connectionHtml(true)}`:''}
+<button class="delbtn" id="pdel">Delete ${itemLabel}</button>`;
 
     const ti=document.getElementById('pt');
     const si=document.getElementById('ps');
@@ -2750,7 +2756,7 @@ function setConnHover(nodeId=null,port=null){
   clearConnHover();
   if(!S.conn||!nodeId||nodeId===S.conn.fromId)return;
   const node=byId(nodeId);
-  if(!node||node.locked)return;
+  if(!node||node.locked||node.tp==='text')return;
   S.conn.hoverNodeId=nodeId;
   S.conn.hoverPort=port||null;
   const nodeEl=document.querySelector(`.node-g[data-nid="${CSS.escape(nodeId)}"]`);
@@ -2762,8 +2768,13 @@ function setConnHover(nodeId=null,port=null){
 function createConnectionFromConn(targetId,targetPort=null){
   if(S.readOnly)return false;
   if(!S.conn||!targetId||targetId===S.conn.fromId)return false;
+  const fromNode=byId(S.conn.fromId);
   const targetNode=byId(targetId);
-  if(!targetNode)return false;
+  if(!fromNode||!targetNode)return false;
+  if(fromNode.tp==='text'||targetNode.tp==='text'){
+    showToast('Annotations cannot be connected with edges.','info');
+    return false;
+  }
   if(targetNode.locked){
     showLockedSelectionToast('connected');
     return false;
